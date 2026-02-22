@@ -39,7 +39,9 @@
 #include "ulib_camera.cpp"
 #include "ulib_scene.cpp"
 #include "ulib_geometry.cpp"
+#ifndef WEBCHUGL_NO_IMGUI
 #include "ulib_imgui.cpp"
+#endif
 #include "ulib_material.cpp"
 #include "ulib_texture.cpp"
 #include "ulib_text.cpp"
@@ -426,7 +428,26 @@ static void chugl_GraphicsShredUnregister(Chuck_VM_Shred* SHRED)
 
     // if this is the last graphics shred...
     if (Sync_NumShredsRegistered() == 0) {
+#ifdef __EMSCRIPTEN__
+        // On web: reset the scene for live coding (clear objects, restore defaults)
+        // Keep the default camera (render pipeline asserts camera->scene_id)
+        // and lights (0-light buffer violates WebGPU minBindingSize)
+        SG_Scene* scene = SG_GetScene(gg_config.mainScene);
+        if (scene) {
+            SG_ID cam_id = scene->desc.main_camera_id;
+            for (int i = (int)SG_Transform::numChildren(scene) - 1; i >= 0; i--) {
+                SG_Transform* child = SG_Transform::child(scene, i);
+                if (!child) continue;
+                if (child->id == cam_id || child->type == SG_COMPONENT_LIGHT)
+                    continue;
+                CQ_PushCommand_RemoveChild(scene, child);
+            }
+            scene->desc.bg_color = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            CQ_PushCommand_SceneUpdate(scene);
+        }
+#else
         CQ_PushCommand_WindowClose();
+#endif
     }
 
     // if this would have been the one to trigger graphics thread wakeup, do it
@@ -1046,7 +1067,9 @@ CK_DLL_QUERY(ChuGL)
     ulib_texture_query(QUERY);
     ulib_ggen_query(QUERY);
     ulib_light_query(QUERY);
+#ifndef WEBCHUGL_NO_IMGUI
     ulib_imgui_query(QUERY);
+#endif
     ulib_camera_query(QUERY);
     ulib_buffer_query(QUERY);
     ulib_geometry_query(QUERY);
