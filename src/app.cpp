@@ -42,10 +42,12 @@ static_assert(sizeof(u32) == sizeof(b2WorldId), "b2WorldId != u32");
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
 
+#ifndef WEBCHUGL_NO_IMGUI
 #include <imgui/backends/imgui_impl_glfw.h>
 #include <imgui/backends/imgui_impl_wgpu.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h> // ImPool<>, ImHashData
+#endif
 
 #include <nanotime/nanotime.h>
 #include <sokol/sokol_time.h>
@@ -65,6 +67,10 @@ static void (*g_webchugl_pre_frame_fn)(void*) = nullptr;
 static void* g_webchugl_pre_frame_data = nullptr;
 // When true, the emscripten main loop stops on the next frame
 static bool g_webchugl_stop_requested = false;
+
+// XR: global App pointer for extern "C" XR hooks
+struct App;
+static App* g_xr_app_ptr = nullptr;
 
 extern "C" void webchugl_set_pre_frame_callback(void (*fn)(void*), void* data)
 {
@@ -92,8 +98,11 @@ extern "C" void _chugl_setup_letterbox(double ar_x, double ar_y);
 #include "core/hashmap.h"
 #include "core/log.h"
 
+#ifndef WEBCHUGL_NO_IMGUI
 #include "compressed_fonts.h"
+#endif
 
+#ifndef WEBCHUGL_NO_IMGUI
 // Usage:
 //  static ImDrawDataSnapshot snapshot; // Important: make persistent accross
 //  frames to reuse buffers. snapshot.SnapUsingSwap(ImGui::GetDrawData(),
@@ -201,6 +210,7 @@ static WGPUTextureView ImGui_ImplWGPU_GetTextureId(ImTextureID id, void* user)
     desc = { tex->gpu_texture, WGPUTextureViewDimension_2D, 0, 1, 0, 1 };
     return cache->textureView(desc);
 }
+#endif // WEBCHUGL_NO_IMGUI
 
 struct TickStats {
     u64 fc    = 0;
@@ -458,6 +468,7 @@ struct App {
         // initialize R_Component manager
         Component_Init(&app->gctx);
 
+#ifndef WEBCHUGL_NO_IMGUI
         { // initialize imgui
             // Setup Dear ImGui context
             IMGUI_CHECKVERSION();
@@ -483,6 +494,7 @@ struct App {
             // Setup Dear ImGui style
             ImGui::StyleColorsDark();
         }
+#endif
 
         { // set window callbacks
             glfwSetWindowUserPointer(app->window, app);
@@ -503,6 +515,7 @@ struct App {
                               //   https://github.com/glfw/glfw/issues/1968)
         }
 
+#ifndef WEBCHUGL_NO_IMGUI
         // Setup ImGui Platform/Renderer backends
         {
             ImGui_ImplGlfw_InitForOther(app->window, true);
@@ -512,21 +525,27 @@ struct App {
             init_info.RenderTargetFormat = app->gctx.surface_format;
             ImGui_ImplWGPU_Init(&init_info);
         }
+#endif
 
         // trigger window resize callback to set up imgui
         int width, height;
         glfwGetFramebufferSize(app->window, &width, &height);
         _onFramebufferResize(app->window, width, height);
 
+#ifndef WEBCHUGL_NO_IMGUI
         // initialize imgui frame (should be threadsafe as long as graphics
         // shreds start with GG.nextFrame() => now)
         ImGui_ImplWGPU_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+#endif
 
         // main loop
         log_trace("entering  main loop");
 #ifdef __EMSCRIPTEN__
+        // Store app pointer for XR hooks
+        g_xr_app_ptr = app;
+
         // https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_set_main_loop_arg
         // can't have an infinite loop in emscripten
         // instead pass a callback to emscripten_set_main_loop_arg
@@ -658,12 +677,17 @@ struct App {
             - exposes a gameloop to chuck, gauranteed to be executed once per
         frame deadlock shouldn't happen because both locks are never held at the
         same time */
+#ifndef WEBCHUGL_NO_IMGUI
         bool do_ui = !app->imgui_disabled;
+#else
+        bool do_ui = false;
+#endif
 
         {
             CQ_SwapQueues(); // ~ .0001ms
 
             // u64 critical_start = stm_now();
+#ifndef WEBCHUGL_NO_IMGUI
             // Rendering
             if (do_ui) {
                 ImGui::Render();
@@ -671,6 +695,7 @@ struct App {
                 // copy imgui draw data for rendering later
                 snapshot.SnapUsingSwap(ImGui::GetDrawData(), ImGui::GetTime());
             }
+#endif
 
             // imgui and window callbacks
             CHUGL_Zero_MouseDeltasAndClickState();
@@ -712,6 +737,7 @@ struct App {
                 }
             }
 
+#ifndef WEBCHUGL_NO_IMGUI
             if (do_ui) {
                 // reset imgui
                 ImGui_ImplWGPU_NewFrame();
@@ -722,6 +748,7 @@ struct App {
                 ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
                                              ImGuiDockNodeFlags_PassthruCentralNode);
             }
+#endif
             // ~2.15ms (15%) In DEBUG mode!
             // critical_section_stats.update(stm_since(critical_start));
 
@@ -1275,6 +1302,7 @@ struct App {
         // and with imgui pass
         app->rendergraph.executeAndReset(app->gctx.device, app->gctx.commandEncoder);
 
+#ifndef WEBCHUGL_NO_IMGUI
         // imgui render pass
         if (do_ui && !resized_this_frame) {
             WGPURenderPassColorAttachment imgui_color_attachment = {};
@@ -1300,6 +1328,7 @@ struct App {
             wgpuRenderPassEncoderEnd(render_pass);
             wgpuRenderPassEncoderRelease(render_pass);
         }
+#endif
 
         GraphicsContext::presentFrame(&app->gctx);
     }
@@ -1409,8 +1438,10 @@ struct App {
     {
         // log_debug("mouse button callback");
 
+#ifndef WEBCHUGL_NO_IMGUI
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
+#endif
 
         App* app = (App*)glfwGetWindowUserPointer(window);
         UNUSED_VAR(app);
@@ -1430,8 +1461,10 @@ struct App {
 
     static void _scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
     {
+#ifndef WEBCHUGL_NO_IMGUI
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
+#endif
 
         App* app = (App*)glfwGetWindowUserPointer(window);
         UNUSED_VAR(app);
@@ -1441,8 +1474,10 @@ struct App {
 
     static void _cursorPositionCallback(GLFWwindow* window, double xpos, double ypos)
     {
+#ifndef WEBCHUGL_NO_IMGUI
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
+#endif
 
         App* app = (App*)glfwGetWindowUserPointer(window);
         UNUSED_VAR(app);
@@ -2535,3 +2570,562 @@ static void _R_HandleCommand(App* app, SG_Command* command)
     }
 }
 
+// =============================================================================
+// WebXR Entry Points
+// =============================================================================
+#ifdef __EMSCRIPTEN__
+
+// Called once per XR frame, before rendering any eyes.
+// Replicates _mainLoop steps: sync, dt, swap, events, broadcast, command flush,
+// and creates the command encoder (without acquiring a surface texture).
+extern "C" void chugl_xr_frame_begin()
+{
+    App* app = g_xr_app_ptr;
+    if (!app) return;
+
+    // Frame metrics (replicates the emscripten main loop lambda)
+    App::_calculateFPS(app->window, app->show_fps_title);
+    ++app->fc;
+    f64 currentTime = glfwGetTime();
+    if (app->lastTime == 0) app->lastTime = currentTime;
+    app->dt       = currentTime - app->lastTime;
+    app->lastTime = currentTime;
+
+    // --- Replicate _mainLoop steps 1-6 ---
+
+    static u64 xr_prev_lap_time = 0;
+    if (xr_prev_lap_time == 0) xr_prev_lap_time = stm_now();
+
+    Sync_WaitOnUpdateDone();
+
+    u64 dt_ticks = stm_laptime(&xr_prev_lap_time);
+    f64 dt_sec   = stm_sec(dt_ticks);
+    CHUGL_Window_dt(dt_sec);
+
+    {
+        CQ_SwapQueues();
+        CHUGL_Zero_MouseDeltasAndClickState();
+        CHUGL_Kb_ZeroPressedReleased();
+        glfwPollEvents();
+    }
+
+    // Wake shreds waiting on GG.nextFrame()
+    if (app->ckapi && app->ckvm) {
+        Event_Broadcast(CHUGL_EventType::NEXT_FRAME, app->ckapi, app->ckvm);
+    }
+
+#ifndef WEBCHUGL_NO_BOX2D
+    {
+        b2WorldId b2_world_id = *(b2WorldId*)&app->b2_sim_desc.world_id;
+        if (b2World_IsValid(b2_world_id)) {
+            b2World_Step(b2_world_id, app->b2_sim_desc.rate * app->dt,
+                         app->b2_sim_desc.substeps);
+        }
+    }
+#endif
+
+    // Flush command queue
+    {
+        SG_Command* cmd = NULL;
+        while (CQ_ReadCommandQueueIter(&cmd)) _R_HandleCommand(app, cmd);
+        CQ_ReadCommandQueueClear();
+    }
+
+    // Create command encoder (no surface texture for XR)
+    WGPU_RELEASE_RESOURCE(TextureView, app->gctx.backbufferView);
+    WGPU_RELEASE_RESOURCE(CommandEncoder, app->gctx.commandEncoder);
+    WGPUCommandEncoderDescriptor encoderDesc = {};
+    app->gctx.commandEncoder
+      = wgpuDeviceCreateCommandEncoder(app->gctx.device, &encoderDesc);
+
+#ifndef WEBCHUGL_NO_VIDEO
+    {
+        size_t webcam_idx = 0;
+        R_Webcam* webcam  = NULL;
+        while (Component_WebcamIter(&webcam_idx, &webcam)) {
+            R_Webcam::updateTexture(&app->gctx, webcam);
+        }
+    }
+    {
+        size_t video_idx = 0;
+        R_Video* video   = NULL;
+        while (Component_VideoIter(&video_idx, &video)) {
+            if (video->plm) {
+                plm_decode_last_frame_only(video->plm, dt_sec * video->rate);
+            }
+        }
+    }
+#endif
+}
+
+// Render the scene graph to an XR eye texture.
+// Called once per eye per frame, between chugl_xr_frame_begin/end.
+// Replicates the render graph walk from _mainLoop, substituting the XR eye
+// texture for the backbuffer and using XR view/projection matrices.
+extern "C" void chugl_xr_render_eye(WGPUTextureView xr_view,
+                                     WGPUTexture xr_texture,
+                                     int xr_format_int, int fb_width,
+                                     int fb_height, float* view_matrix,
+                                     float* proj_matrix, float* cam_pos)
+{
+    App* app = g_xr_app_ptr;
+    if (!app || !app->gctx.commandEncoder) return;
+
+    WGPUTextureFormat xr_format = (WGPUTextureFormat)xr_format_int;
+    f32 aspect
+      = (fb_width > 0 && fb_height > 0) ? (f32)fb_width / (f32)fb_height : 1.0f;
+
+    // Build XR camera matrices
+    glm::mat4 xr_proj     = glm::make_mat4(proj_matrix);
+    glm::mat4 xr_view_mat = glm::make_mat4(view_matrix);
+    glm::vec3 xr_cam_pos  = glm::vec3(cam_pos[0], cam_pos[1], cam_pos[2]);
+
+    // Walk render graph (mirrors _mainLoop lines 831-1273)
+    R_Pass* root_pass = Component_GetPass(app->root_pass_id);
+    R_Pass* pass      = Component_GetPass(root_pass->sg_pass.next_pass_id);
+
+    char string_buff[128] = {};
+
+    FrameUniforms frameUniforms = {};
+    frameUniforms.time          = app->lastTime;
+    frameUniforms.delta_time    = app->dt;
+    frameUniforms.resolution    = glm::ivec3(fb_width, fb_height, 1);
+    frameUniforms.frame_count   = app->fc;
+    frameUniforms.sample_rate   = app->ck_srate;
+    frameUniforms.mouse         = glm::vec2(0.0f, 0.0f);
+    frameUniforms.mouse_click   = glm::ivec2(0, 0);
+
+    while (pass) {
+        R_Scene* scene   = NULL;
+        R_Camera* camera = NULL;
+
+        switch (pass->sg_pass.pass_type) {
+            case SG_PassType_Render: break;
+            case SG_PassType_Scene: {
+                scene = Component_GetScene(pass->sg_pass.scene_id);
+                if (!scene) break;
+
+                camera = pass->sg_pass.camera_id != 0 ?
+                           Component_GetCamera(pass->sg_pass.camera_id) :
+                           Component_GetCamera(scene->sg_scene_desc.main_camera_id);
+                if (!camera) break;
+                ASSERT(camera->scene_id == scene->id);
+
+                R_Texture* r_tex
+                  = Component_GetTexture(pass->sg_pass.color_target_id);
+
+                // XR: passes targeting backbuffer use XR texture instead
+                WGPUTexture color_target;
+                if (r_tex) {
+                    R_Texture::resize(r_tex, fb_width, fb_height,
+                                      app->gctx.device);
+                    color_target = r_tex->gpu_texture;
+                } else {
+                    color_target = xr_texture;
+                }
+
+                ASSERT(scene && color_target && camera);
+
+                R_Scene::update(scene, &app->gctx, app->fc, &app->frameArena,
+                                &app->rendergraph, &frameUniforms);
+
+                R_Pass::updateScenePass(pass, color_target, app->gctx.device);
+                snprintf(string_buff, sizeof(string_buff),
+                         "XR ScenePass[%d:%s] Scene[%d:%s]", pass->id,
+                         pass->sg_pass.name, scene->id, scene->name);
+                app->rendergraph.addRenderPass(string_buff);
+
+                if (pass->sg_pass.scene_pass_msaa) {
+                    app->rendergraph.renderPassColorTarget(
+                      pass->msaa_color_target, 0);
+                    if (r_tex) {
+                        app->rendergraph.renderPassResolveTarget(color_target,
+                                                                  0);
+                    } else {
+                        app->rendergraph.renderPassResolveTarget(xr_view,
+                                                                  xr_format);
+                    }
+                } else {
+                    if (r_tex) {
+                        app->rendergraph.renderPassColorTarget(color_target, 0);
+                    } else {
+                        app->rendergraph.renderPassColorTarget(xr_view,
+                                                                xr_format);
+                    }
+                }
+
+                WGPUColor clear_color = {
+                    scene->sg_scene_desc.bg_color.r,
+                    scene->sg_scene_desc.bg_color.g,
+                    scene->sg_scene_desc.bg_color.b,
+                    scene->sg_scene_desc.bg_color.a,
+                };
+                app->rendergraph.renderPassColorOp(
+                  clear_color,
+                  pass->sg_pass.color_target_clear_on_load ? WGPULoadOp_Clear :
+                                                             WGPULoadOp_Load,
+                  WGPUStoreOp_Store);
+
+                app->rendergraph.renderPassDepthTarget(pass->depth_texture);
+
+                // Viewport/scissor — use XR texture dims when targeting backbuffer
+                u32 color_width  = r_tex ? wgpuTextureGetWidth(color_target)
+                                         : (u32)fb_width;
+                u32 color_height = r_tex ? wgpuTextureGetHeight(color_target)
+                                         : (u32)fb_height;
+                if (pass->sg_pass.viewport_normalized) {
+                    aspect = app->rendergraph.viewport(
+                      pass->sg_pass.viewport_x * color_width,
+                      pass->sg_pass.viewport_y * color_height,
+                      pass->sg_pass.viewport_w * color_width,
+                      pass->sg_pass.viewport_h * color_height, color_target);
+                } else {
+                    aspect = app->rendergraph.viewport(
+                      pass->sg_pass.viewport_x, pass->sg_pass.viewport_y,
+                      pass->sg_pass.viewport_w, pass->sg_pass.viewport_h,
+                      color_target);
+                }
+                if (pass->sg_pass.scissor_normalized) {
+                    app->rendergraph.scissor(
+                      pass->sg_pass.scissor_x * color_width,
+                      pass->sg_pass.scissor_y * color_height,
+                      pass->sg_pass.scissor_w * color_width,
+                      pass->sg_pass.scissor_h * color_height, color_target);
+                } else {
+                    app->rendergraph.scissor(
+                      pass->sg_pass.scissor_x, pass->sg_pass.scissor_y,
+                      pass->sg_pass.scissor_w, pass->sg_pass.scissor_h,
+                      color_target);
+                }
+
+                G_DrawCallListID dc_list
+                  = app->rendergraph.renderPassAddDrawCallList();
+                _R_RenderScene(app, scene, pass, camera, dc_list);
+            } break;
+            case SG_PassType_Screen: {
+                R_Material* material
+                  = Component_GetMaterial(pass->sg_pass.screen_material_id);
+                R_Shader* screen_shader
+                  = Component_GetShader(material->pso.sg_shader_id);
+                if (!screen_shader) break;
+
+                R_Texture* r_tex
+                  = Component_GetTexture(pass->sg_pass.color_target_id);
+                R_Texture::resize(r_tex, fb_width, fb_height, app->gctx.device);
+
+                WGPUTexture color_target = NULL;
+
+                app->rendergraph.addRenderPass(pass->sg_pass.name);
+                if (r_tex) {
+                    color_target = r_tex->gpu_texture;
+                    app->rendergraph.renderPassColorTarget(r_tex->gpu_texture,
+                                                            0);
+                } else {
+                    color_target = xr_texture;
+                    app->rendergraph.renderPassColorTarget(xr_view, xr_format);
+                }
+
+                app->rendergraph.renderPassColorOp(
+                  WGPUColor{ 0.0f, 0.0f, 0.0f, 1.0f },
+                  pass->sg_pass.color_target_clear_on_load ? WGPULoadOp_Clear :
+                                                             WGPULoadOp_Load,
+                  WGPUStoreOp_Store);
+
+                u32 color_width  = r_tex ? wgpuTextureGetWidth(color_target)
+                                         : (u32)fb_width;
+                u32 color_height = r_tex ? wgpuTextureGetHeight(color_target)
+                                         : (u32)fb_height;
+                if (pass->sg_pass.viewport_normalized) {
+                    aspect = app->rendergraph.viewport(
+                      pass->sg_pass.viewport_x * color_width,
+                      pass->sg_pass.viewport_y * color_height,
+                      pass->sg_pass.viewport_w * color_width,
+                      pass->sg_pass.viewport_h * color_height, color_target);
+                } else {
+                    aspect = app->rendergraph.viewport(
+                      pass->sg_pass.viewport_x, pass->sg_pass.viewport_y,
+                      pass->sg_pass.viewport_w, pass->sg_pass.viewport_h,
+                      color_target);
+                }
+                if (pass->sg_pass.scissor_normalized) {
+                    app->rendergraph.scissor(
+                      pass->sg_pass.scissor_x * color_width,
+                      pass->sg_pass.scissor_y * color_height,
+                      pass->sg_pass.scissor_w * color_width,
+                      pass->sg_pass.scissor_h * color_height, color_target);
+                } else {
+                    app->rendergraph.scissor(
+                      pass->sg_pass.scissor_x, pass->sg_pass.scissor_y,
+                      pass->sg_pass.scissor_w, pass->sg_pass.scissor_h,
+                      color_target);
+                }
+
+                G_DrawCallListID dc_list
+                  = app->rendergraph.renderPassAddDrawCallList();
+
+                const int screen_pass_binding_location = 1;
+                if (material) {
+                    G_DrawCall* d = app->rendergraph.addDraw(dc_list);
+                    R_BindFrameUniforms(pass->frame_uniform_buffer, &app->gctx,
+                                        d, &app->rendergraph, screen_shader,
+                                        NULL);
+                    d->sort_key = G_SortKey::create(
+                      false, G_RenderingLayer_World, material->id, 0, 1);
+                    d->vertex_count   = 3;
+                    d->instance_count = 1;
+                    R_Material::createBindGroupEntries(
+                      material, screen_pass_binding_location,
+                      &app->rendergraph, d, &app->gctx);
+                    d->pipelineDesc(material->pso.sg_shader_id,
+                                    material->pso.cull_mode,
+                                    material->pso.primitive_topology,
+                                    &material->pso.blend_state, false);
+                }
+            } break;
+            case SG_PassType_Compute: {
+                R_Material* compute_material
+                  = Component_GetMaterial(pass->sg_pass.compute_material_id);
+                R_Shader* compute_shader
+                  = Component_GetShader(compute_material->pso.sg_shader_id);
+
+                if (compute_material) {
+                    ASSERT(compute_material->pso.sg_shader_id
+                           == (compute_shader ? compute_shader->id : 0));
+                }
+
+                bool valid_compute_pass = compute_material && compute_shader;
+                if (!valid_compute_pass) break;
+
+                app->rendergraph.addComputePass(
+                  pass->name, compute_shader->compute_shader_module,
+                  pass->sg_pass.compute_workgroup.x,
+                  pass->sg_pass.compute_workgroup.y,
+                  pass->sg_pass.compute_workgroup.z);
+
+                const int compute_pass_binding_location = 0;
+                R_Material::createBindGroupEntries(
+                  compute_material, compute_pass_binding_location,
+                  &app->rendergraph, NULL, &app->gctx);
+            }; break;
+            case SG_PassType_Bloom: {
+                R_Texture* input_texture = Component_GetTexture(
+                  pass->sg_pass.bloom_input_render_texture_id);
+                R_Texture* output_texture = Component_GetTexture(
+                  pass->sg_pass.bloom_output_render_texture_id);
+
+                if (!input_texture || !output_texture) break;
+                if (!input_texture->desc.gen_mips
+                    || !output_texture->desc.gen_mips) {
+                    break;
+                }
+
+                u32 input_width
+                  = wgpuTextureGetWidth(input_texture->gpu_texture);
+                u32 input_height
+                  = wgpuTextureGetHeight(input_texture->gpu_texture);
+                R_Texture::resize(output_texture, input_width, input_height,
+                                  app->gctx.device);
+
+                glm::uvec2 full_res_size
+                  = glm::uvec2(input_width, input_height);
+
+                SG_Sampler bloom_sampler = {
+                    SG_SAMPLER_WRAP_CLAMP_TO_EDGE,
+                    SG_SAMPLER_WRAP_CLAMP_TO_EDGE,
+                    SG_SAMPLER_WRAP_CLAMP_TO_EDGE,
+                    SG_SAMPLER_FILTER_LINEAR,
+                    SG_SAMPLER_FILTER_LINEAR,
+                    SG_SAMPLER_FILTER_LINEAR,
+                };
+
+                u32 bloom_mip_levels
+                  = G_mipLevelsLimit(input_width, input_height, 1);
+                bloom_mip_levels = MIN(bloom_mip_levels,
+                                       pass->sg_pass.bloom_num_blur_levels);
+                if (bloom_mip_levels == 0) break;
+
+                { // downscale
+                    R_Material* bloom_downscale_material
+                      = Component_GetMaterial(
+                        pass->sg_pass.bloom_downsample_material_id);
+                    R_Material::setSamplerBinding(
+                      &app->gctx, bloom_downscale_material, 1, bloom_sampler);
+                    R_Material::setUniformBinding(
+                      &app->gctx, bloom_downscale_material, 3, &full_res_size,
+                      sizeof(full_res_size));
+
+                    for (int i = 0; i < (int)bloom_mip_levels - 1; i++) {
+                        char label[64] = {};
+                        snprintf(label, sizeof(label),
+                                 "bloom downscale to mip level %d", i + 1);
+                        R_Material::bindTexture(
+                          &app->gctx, bloom_downscale_material, 0,
+                          { input_texture->id, i, 1 });
+
+                        app->rendergraph.addRenderPass(label);
+                        app->rendergraph.renderPassColorTarget(
+                          input_texture->gpu_texture, i + 1);
+                        app->rendergraph.renderPassColorOp(
+                          WGPUColor{ 0.0f, 0.0f, 0.0f, 1.0f },
+                          WGPULoadOp_Clear, WGPUStoreOp_Store);
+                        G_DrawCallListID dc_list
+                          = app->rendergraph.renderPassAddDrawCallList();
+
+                        G_DrawCall* d = app->rendergraph.addDraw(dc_list);
+                        d->sort_key = G_SortKey::create(
+                          false, G_RenderingLayer_World,
+                          bloom_downscale_material->id, 0, 1);
+                        d->vertex_count   = 3;
+                        d->instance_count = 1;
+                        R_Material::createBindGroupEntries(
+                          bloom_downscale_material, 0, &app->rendergraph, d,
+                          &app->gctx);
+                        d->pipelineDesc(
+                          bloom_downscale_material->pso.sg_shader_id,
+                          bloom_downscale_material->pso.cull_mode,
+                          bloom_downscale_material->pso.primitive_topology,
+                          &bloom_downscale_material->pso.blend_state, false);
+                    }
+                }
+
+                { // upscale
+                    R_Material* bloom_upscale_material
+                      = Component_GetMaterial(
+                        pass->sg_pass.bloom_upsample_material_id);
+                    R_Material::setSamplerBinding(
+                      &app->gctx, bloom_upscale_material, 1, bloom_sampler);
+                    R_Material::setUniformBinding(
+                      &app->gctx, bloom_upscale_material, 3, &full_res_size,
+                      sizeof(full_res_size));
+
+                    bool first_upsample = true;
+                    for (int i = (int)bloom_mip_levels - 2; i >= 0; i--) {
+                        char label[64] = {};
+                        snprintf(label, sizeof(label),
+                                 "bloom upsample to mip level %d", i);
+                        R_Material::bindTexture(
+                          &app->gctx, bloom_upscale_material, 0,
+                          { first_upsample ? input_texture->id
+                                           : output_texture->id,
+                            i + 1, 1 });
+                        R_Material::bindTexture(&app->gctx,
+                                                bloom_upscale_material, 2,
+                                                { input_texture->id, i, 1 });
+
+                        app->rendergraph.addRenderPass(label);
+                        app->rendergraph.renderPassColorTarget(
+                          output_texture->gpu_texture, i);
+                        app->rendergraph.renderPassColorOp(
+                          WGPUColor{ 0.0f, 0.0f, 0.0f, 1.0f },
+                          WGPULoadOp_Clear, WGPUStoreOp_Store);
+                        G_DrawCallListID dc_list
+                          = app->rendergraph.renderPassAddDrawCallList();
+
+                        G_DrawCall* d = app->rendergraph.addDraw(dc_list);
+                        d->sort_key = G_SortKey::create(
+                          false, G_RenderingLayer_World,
+                          bloom_upscale_material->id, 0, 1);
+                        d->vertex_count   = 3;
+                        d->instance_count = 1;
+                        R_Material::createBindGroupEntries(
+                          bloom_upscale_material, 0, &app->rendergraph, d,
+                          &app->gctx);
+                        d->pipelineDesc(
+                          bloom_upscale_material->pso.sg_shader_id,
+                          bloom_upscale_material->pso.cull_mode,
+                          bloom_upscale_material->pso.primitive_topology,
+                          &bloom_upscale_material->pso.blend_state, false);
+
+                        first_upsample = false;
+                    }
+                }
+            } break;
+            default: ASSERT(false);
+        } // switch (pass type)
+
+        { // write per-frame uniforms — XR overrides camera matrices
+            if (camera) {
+                frameUniforms.projection = xr_proj;
+                frameUniforms.view       = xr_view_mat;
+                frameUniforms.projection_view_inverse_no_translation
+                  = glm::inverse(frameUniforms.projection
+                                 * glm::mat4(glm::mat3(frameUniforms.view)));
+                frameUniforms.camera_pos = xr_cam_pos;
+            } else {
+                FrameUniforms_ZeroCameraFields(&frameUniforms);
+            }
+
+            if (scene) {
+                frameUniforms.ambient_light = scene->sg_scene_desc.ambient_light;
+                frameUniforms.num_lights    = R_Scene::numLights(scene);
+                frameUniforms.background_color = scene->sg_scene_desc.bg_color;
+            } else {
+                FrameUniforms_ZeroLightingFields(&frameUniforms);
+            }
+            wgpuQueueWriteBuffer(app->gctx.queue, pass->frame_uniform_buffer,
+                                 0, &frameUniforms, sizeof(frameUniforms));
+        }
+
+        pass = Component_GetPass(pass->sg_pass.next_pass_id);
+    }
+
+    // Execute all recorded render passes
+    app->rendergraph.executeAndReset(app->gctx.device,
+                                     app->gctx.commandEncoder);
+}
+
+// Called once per XR frame after all eyes are rendered.
+// Finishes the command encoder, submits to the queue (no surface present).
+extern "C" void chugl_xr_frame_end()
+{
+    App* app = g_xr_app_ptr;
+    if (!app || !app->gctx.commandEncoder) return;
+
+    // Submit
+    WGPUCommandBufferDescriptor cmdBufferDescriptor = {};
+    WGPUCommandBuffer command
+      = wgpuCommandEncoderFinish(app->gctx.commandEncoder, &cmdBufferDescriptor);
+    wgpuQueueSubmit(app->gctx.queue, 1, &command);
+
+    // No wgpuSurfacePresent — XR compositor handles presentation
+
+    WGPU_RELEASE_RESOURCE(CommandBuffer, command);
+
+    Arena::clear(&app->gctx.frame_arena);
+    Arena::clear(&app->frameArena);
+}
+
+// Re-registers the emscripten main loop after XR session ends.
+// Resumes normal (non-XR) rendering.
+extern "C" void chugl_restart_emscripten_loop()
+{
+    App* app = g_xr_app_ptr;
+    if (!app) return;
+
+    emscripten_set_main_loop_arg(
+      [](void* runner) {
+          App* app = (App*)runner;
+
+          // Run pre-frame callback (VM advancement on web)
+          if (g_webchugl_pre_frame_fn) {
+              g_webchugl_pre_frame_fn(g_webchugl_pre_frame_data);
+          }
+
+          // Frame metrics
+          App::_calculateFPS(app->window, app->show_fps_title);
+          ++app->fc;
+          f64 currentTime = glfwGetTime();
+          if (app->lastTime == 0) app->lastTime = currentTime;
+          app->dt       = currentTime - app->lastTime;
+          app->lastTime = currentTime;
+
+          App::_mainLoop(app);
+          Arena::clear(&app->frameArena);
+      },
+      app, // user data (void *)
+      -1,  // FPS (negative means use browser's requestAnimationFrame)
+      false // don't simulate infinite loop (we're resuming, not starting)
+    );
+}
+
+#endif // __EMSCRIPTEN__
