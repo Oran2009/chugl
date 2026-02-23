@@ -173,7 +173,7 @@ WGPUSurface glfwGetWGPUSurface(WGPUInstance instance, GLFWwindow* window) {
                         .next = NULL,
                         .sType = WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector,
                     },
-                    .selector = "canvas",
+                    .selector = "Module['canvas']",
                 },
             }
         );
