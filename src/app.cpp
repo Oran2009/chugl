@@ -400,11 +400,17 @@ struct App {
             // Make canvas fill the browser window and auto-resize
             emscripten_glfw_make_canvas_resizable(app->window, "window", nullptr);
 
-            // Let browser handle keyboard shortcuts (Ctrl+T, Ctrl+W, etc.)
-            // by returning true (= let browser handle) when Ctrl or Meta is held.
+            // Let browser handle keyboard events when:
+            // 1. Ctrl or Meta is held (browser shortcuts like Ctrl+T, Ctrl+W)
+            // 2. The canvas does not have DOM focus (so embedded pages keep
+            //    keyboard input for their own elements)
             emscripten::glfw3::AddBrowserKeyCallback(
               [](GLFWwindow*, int, int, int, int mods) -> bool {
-                  return (mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0;
+                  if ((mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0)
+                      return true;
+                  return (bool)EM_ASM_INT({
+                      return document.activeElement !== Module['canvas'] ? 1 : 0;
+                  });
               });
 #endif
         }
