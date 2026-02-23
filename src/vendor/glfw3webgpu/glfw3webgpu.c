@@ -180,7 +180,7 @@ WGPUSurface glfwCreateWindowWGPUSurface(WGPUInstance instance, GLFWwindow* windo
         fromCanvasHTMLSelector.chain.sType = WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector;
 #  endif
         fromCanvasHTMLSelector.chain.next = NULL;
-        fromCanvasHTMLSelector.selector = "canvas";
+        fromCanvasHTMLSelector.selector = "Module['canvas']";
 
         WGPUSurfaceDescriptor surfaceDescriptor;
         surfaceDescriptor.nextInChain = &fromCanvasHTMLSelector.chain;
