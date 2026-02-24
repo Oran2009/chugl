@@ -32,7 +32,9 @@
 
 // ulibs
 #include "ulib_color.cpp"
+#ifndef WEBCHUGL_NO_BOX2D
 #include "ulib_box2d.cpp"
+#endif
 #include "ulib_component.cpp"
 #include "ulib_camera.cpp"
 #include "ulib_scene.cpp"
@@ -46,7 +48,9 @@
 #include "ulib_buffer.cpp"
 #include "ulib_light.cpp"
 
+#ifndef WEBCHUGL_NO_VIDEO
 #include "ulib_video.cpp"
+#endif
 
 #ifndef CHUGL_FAST_COMPILE
 #include "ulib_assloader.cpp"
@@ -55,13 +59,18 @@
 
 // vendor
 #include <sokol/sokol_time.h>
+#ifndef __EMSCRIPTEN__
 #include <tinyfiledialogs/tinyfiledialogs.h>
+#endif
+#ifndef __EMSCRIPTEN__
 #include <tinycthread/tinycthread.h>
+#endif
 
 // clang-format on
 
 static f64 ckdt_sec      = 0;
 static f64 system_dt_sec = 0;
+
 static App chugl_app     = {};
 
 t_CKBOOL chugl_main_loop_hook(void* bindle)
@@ -333,7 +342,9 @@ static void chugl_GraphicsShredPerformNextFrameUpdate(Chuck_VM_Shred* SHRED)
     // activate hook only on GG.nextFrame();
     if (!hookActivated) {
         hookActivated = true;
+#ifndef __EMSCRIPTEN__
         hook->activate(hook);
+#endif
     }
 
     if (allShredsWaiting && first_of_last_shreds_waited) {
@@ -413,7 +424,7 @@ static void chugl_GraphicsShredUnregister(Chuck_VM_Shred* SHRED)
     // remove from registered list
     Sync_UnregisterShred(SHRED);
 
-    // if this is the last graphics shred, close the window
+    // if this is the last graphics shred...
     if (Sync_NumShredsRegistered() == 0) {
         CQ_PushCommand_WindowClose();
     }
@@ -422,6 +433,11 @@ static void chugl_GraphicsShredUnregister(Chuck_VM_Shred* SHRED)
     // now
     {
         spinlock::lock(&waitingShredsLock);
+        // Reset waitingShreds when all graphics shreds are gone to prevent
+        // stale counter from blocking allShredsWaiting for new shreds
+        if (Sync_NumShredsRegistered() == 0) {
+            waitingShreds = 0;
+        }
         chugl_GraphicsShredPerformNextFrameUpdate(SHRED);
     }
 }
@@ -708,6 +724,7 @@ void processAsyncFileDialogResults()
     spinlock::unlock(&file_dialog_lock);
 }
 
+#ifndef __EMSCRIPTEN__
 /* This is the child thread function */
 int OpenFileDialogThread(void* arg)
 {
@@ -728,6 +745,7 @@ int OpenFileDialogThread(void* arg)
     /* returns NULL on cancel */
     return 0;
 }
+#endif // __EMSCRIPTEN__
 
 // #define thrd_error    0 /**< The requested operation failed */
 // #define thrd_success  1 /**< The requested operation succeeded */
@@ -755,20 +773,23 @@ Chuck_Object* chugl_create_file_dialog_event(FileDialogType type, Chuck_VM_Shred
 
 CK_DLL_SFUN(chugl_open_file_dialog_async)
 {
+#ifdef __EMSCRIPTEN__
+    RETURN->v_object = NULL; // File dialogs not supported on web
+#else
     Chuck_Object* event = chugl_create_file_dialog_event(FileDialog_Open, SHRED);
     thrd_t t;
     if (thrd_create(&t, OpenFileDialogThread, event) != thrd_success) {
-        // TODO error msg
-
-        // char* file       = tinyfd_openFileDialog(NULL, NULL, 0, NULL, NULL, 0);
-        // RETURN->v_object = (Chuck_Object*)chugin_createCkString(file, false);
     }
 
     RETURN->v_object = event;
+#endif
 }
 
 CK_DLL_SFUN(chugl_open_file_dialog)
 {
+#ifdef __EMSCRIPTEN__
+    RETURN->v_object = NULL; // File dialogs not supported on web
+#else
     Chuck_String* ck_str_default_path = GET_NEXT_STRING(ARGS);
 
     const char* default_path
@@ -780,21 +801,14 @@ CK_DLL_SFUN(chugl_open_file_dialog)
     } else {
         RETURN->v_object = NULL;
     }
-
-    // char * tinyfd_openFileDialog(
-    // 	char const * aTitle, /* NULL or "" */
-    // 	char const * aDefaultPathAndOrFile, /* NULL or "" , ends with / to set only a
-    // directory */ 	int aNumOfFilterPatterns , /* 0 (2 in the following example) */
-    // char const * const * aFilterPatterns, /* NULL or char const *
-    // lFilterPatterns[2]={"*.png","*.jpg"}; */ 	char const *
-    // aSingleFilterDescription,
-    // /* NULL or "image files" */ 	int aAllowMultipleSelects ) ; /* 0 or 1 */
-    /* in case of multiple files, the separator is | */
-    /* returns NULL on cancel */
+#endif
 }
 
 CK_DLL_SFUN(chugl_save_file_dialog_ex)
 {
+#ifdef __EMSCRIPTEN__
+    RETURN->v_object = NULL; // File dialogs not supported on web
+#else
     Chuck_String* ck_str_default_path = GET_NEXT_STRING(ARGS);
 
     const char* default_path
@@ -806,10 +820,14 @@ CK_DLL_SFUN(chugl_save_file_dialog_ex)
     } else {
         RETURN->v_object = NULL;
     }
+#endif
 }
 
 CK_DLL_SFUN(chugl_select_folder_dialog)
 {
+#ifdef __EMSCRIPTEN__
+    RETURN->v_object = NULL; // File dialogs not supported on web
+#else
     Chuck_String* ck_str_default_path = GET_NEXT_STRING(ARGS);
 
     const char* default_path
@@ -821,6 +839,7 @@ CK_DLL_SFUN(chugl_select_folder_dialog)
     } else {
         RETURN->v_object = NULL;
     }
+#endif
 }
 
 // ============================================================================
@@ -912,6 +931,9 @@ CK_DLL_QUERY(ChuGL)
     log_set_level(LOG_WARN); // only log errors and fatal in release mode
 #endif
 
+    // initialize performance counters (sokol_time)
+    stm_setup();
+
     // remember
     g_chuglVM  = QUERY->ck_vm(QUERY);
     g_chuglAPI = QUERY->ck_api(QUERY);
@@ -933,9 +955,11 @@ CK_DLL_QUERY(ChuGL)
     SG_Init(g_chuglAPI);
     CQ_Init();
 
+#ifndef __EMSCRIPTEN__
     // set up for main thread hook, for running ChuGL on the main thread
     hook = QUERY->create_main_thread_hook(QUERY, chugl_main_loop_hook,
                                           chugl_main_loop_quit, NULL);
+#endif
 
     // initialize ChuGL API ========================================
     { // chugl events
@@ -1013,7 +1037,9 @@ CK_DLL_QUERY(ChuGL)
     }
 
     ulib_color_query(QUERY);
+#ifndef WEBCHUGL_NO_BOX2D
     ulib_box2d_query(QUERY);
+#endif
 
     ulib_window_query(QUERY);
     ulib_component_query(QUERY);
@@ -1030,7 +1056,9 @@ CK_DLL_QUERY(ChuGL)
     ulib_pass_query(QUERY);
     ulib_text_query(QUERY);
 
+#ifndef WEBCHUGL_NO_VIDEO
     ulib_video_query(QUERY);
+#endif
 
 #ifndef CHUGL_FAST_COMPILE
     ulib_assloader_query(QUERY);

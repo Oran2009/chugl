@@ -28,9 +28,11 @@
 #pragma once
 
 #include "graphics.h"
+#include "geometry.h"  // PlaneParams, BoxParams, etc.
 
 #include "core/macros.h"
 #include "core/memory.h"
+#include "core/log.h"   // log_warn, log_error, etc.
 
 #include <chuck/chugin.h>
 #include <glm/glm.hpp>
@@ -38,7 +40,9 @@
 
 #include <iostream> // std::string
 
+#ifndef WEBCHUGL_NO_VIDEO
 #include <pl/pl_mpeg.h>
+#endif
 
 // forward decls
 struct SG_Light;
@@ -151,7 +155,7 @@ static SG_Sampler SG_SAMPLER_DEFAULT // make this a #define instead?
 // SG_Texture
 // ============================================================================
 
-WGPUTextureUsageFlags WGPUTextureUsage_All
+inline WGPUTextureUsageFlags WGPUTextureUsage_All
   = WGPUTextureUsage_CopyDst | WGPUTextureUsage_CopySrc
     | WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
     | WGPUTextureUsage_StorageBinding;
@@ -950,6 +954,7 @@ struct SG_Light : public SG_Transform {
 };
 
 // ============================================================================
+#ifndef WEBCHUGL_NO_VIDEO
 // SG Video
 // ============================================================================
 
@@ -1002,6 +1007,7 @@ struct SG_Webcam : public SG_Component {
     bool capture = true;
     char device_name[64];
 };
+#endif // WEBCHUGL_NO_VIDEO
 
 // ============================================================================
 // SG Component Manager
@@ -1031,9 +1037,11 @@ SG_Shader* SG_CreateShader(Chuck_Object* ckobj, const char* vertex_string,
 SG_Material* SG_CreateMaterial(Chuck_Object* ckobj, SG_MaterialType material_type);
 SG_Mesh* SG_CreateMesh(Chuck_Object* ckobj, SG_Geometry* sg_geo, SG_Material* sg_mat);
 SG_Light* SG_CreateLight(Chuck_Object* ckobj);
+#ifndef WEBCHUGL_NO_VIDEO
 SG_Video* SG_CreateVideo(Chuck_Object* ckobj, t_CKUINT id_offset);
 SG_Webcam* SG_CreateWebcam(Chuck_Object* ckobj, Chuck_VM_Shred* shred, int device_id,
                            int width, int height, int fps);
+#endif
 
 SG_Component* SG_GetComponent(SG_ID id);
 SG_Transform* SG_GetTransform(SG_ID id);
@@ -1048,8 +1056,10 @@ SG_Text* SG_GetText(SG_ID id);
 SG_Pass* SG_GetPass(SG_ID id);
 SG_Buffer* SG_GetBuffer(SG_ID id);
 SG_Light* SG_GetLight(SG_ID id);
+#ifndef WEBCHUGL_NO_VIDEO
 SG_Video* SG_GetVideo(SG_ID id);
 SG_Webcam* SG_GetWebcam(SG_ID id);
+#endif
 
 // ============================================================================
 // SG Garbage Collection

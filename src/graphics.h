@@ -27,8 +27,11 @@
 -----------------------------------------------------------------------------*/
 #pragma once
 
+#include "chugl_defines.h"  // CHUGL_MATERIAL_MAX_BINDINGS
 #include "core/macros.h"
 #include "core/memory.h"
+
+#include <cstring>  // memcpy
 
 #include <glfw3webgpu/glfw3webgpu.h>
 #include <webgpu/webgpu.h>

@@ -96,8 +96,10 @@ enum SG_CommandType : u32 {
     // UI
     SG_COMMAND_UI_DISABLED,
 
+#ifndef WEBCHUGL_NO_BOX2D
     // b2 physics
     SG_COMMAND_b2_WORLD_SET,
+#endif
 
     // components
     SG_COMMAND_COMPONENT_UPDATE_NAME,
@@ -536,6 +538,7 @@ struct SG_Command_PassConnect : public SG_Command {
     SG_ID next_pass_id;
 };
 
+#ifndef WEBCHUGL_NO_BOX2D
 // b2 physics commands -----------------------------------------------------
 
 struct b2_SimulateDesc {
@@ -547,6 +550,7 @@ struct b2_SimulateDesc {
 struct SG_Command_b2World_Set : public SG_Command {
     b2_SimulateDesc desc;
 };
+#endif
 
 // buffer commands -----------------------------------------------------
 
@@ -583,6 +587,7 @@ struct SG_Command_MeshSetShadowed : public SG_Command {
     b32 shadowed;
 };
 
+#ifndef WEBCHUGL_NO_VIDEO
 // video commands -----------------------------------------------------
 struct SG_Command_VideoUpdate : public SG_Command {
     SG_ID video_id;
@@ -625,6 +630,7 @@ struct SG_Command_WebcamUpdate : public SG_Command {
     bool freeze;
     bool capture;
 };
+#endif // WEBCHUGL_NO_VIDEO
 
 // ============================================================================
 // Graphics to Audio Commands
@@ -680,6 +686,15 @@ void CQ_ReadCommandQueueClear(bool which);
 // (necessary to avoid segfaults from direct pointers to the arena memory
 // caused by Arena resizing)
 void* CQ_ReadCommandGetOffset(u64 byte_offset, bool which);
+
+// Write queue accessors (for WebChuGL Audio Worklet to send commands to main thread)
+void* CQ_GetWriteQueueBase(bool which);
+size_t CQ_GetWriteQueueSize(bool which);
+
+// Read queue injection (for WebChuGL main thread to receive commands from audio worklet)
+void CQ_InjectCommandBytes(void* data, size_t size, bool which);
+void* CQ_GetReadQueueBuffer(bool which);
+void CQ_SetReadQueueSize(size_t size, bool which);
 
 // ============================================================================
 // Commands
@@ -789,8 +804,10 @@ void CQ_PushCommand_PassUpdate(SG_Pass* pass);
 void CQ_PushCommand_PassConnect(SG_Pass* pass, SG_Pass* next_pass);
 void CQ_PushCommand_PassDisconnect(SG_Pass* pass, SG_Pass* next_pass);
 
+#ifndef WEBCHUGL_NO_BOX2D
 // b2
 void CQ_PushCommand_b2World_Set(b2_SimulateDesc desc);
+#endif
 
 // buffer
 void CQ_PushCommand_BufferUpdate(SG_Buffer* buffer);
@@ -805,6 +822,7 @@ void CQ_PushCommand_ShadowAddMesh(SG_Light* light, SG_Transform* xform,
                                   bool add_children, bool add);
 void CQ_PushCommand_MeshSetShadowed(SG_Transform* xform, bool shadowed);
 
+#ifndef WEBCHUGL_NO_VIDEO
 // video
 void CQ_PushCommand_VideoUpdate(SG_Video* video);
 void CQ_PushCommand_VideoSeek(SG_ID video_id, double time);
@@ -814,6 +832,7 @@ void CQ_PushCommand_VideoTextureMode(SG_Video* video, int mode);
 // webcam
 void CQ_PushCommand_WebcamCreate(SG_Webcam* webcam, sr_webcam_device* device);
 void CQ_PushCommand_WebcamUpdate(SG_Webcam* webcam);
+#endif
 
 // ============================================================================
 // Commands from Graphics Thread --> Audio Thread

@@ -974,12 +974,14 @@ void CQ_PushCommand_PassDisconnect(SG_Pass* pass, SG_Pass* next_pass)
     END_COMMAND();
 }
 
+#ifndef WEBCHUGL_NO_BOX2D
 void CQ_PushCommand_b2World_Set(b2_SimulateDesc desc)
 {
     BEGIN_COMMAND(SG_Command_b2World_Set, SG_COMMAND_b2_WORLD_SET);
     command->desc = desc;
     END_COMMAND();
 }
+#endif
 
 void CQ_PushCommand_BufferUpdate(SG_Buffer* buffer)
 {
@@ -1058,6 +1060,7 @@ void CQ_PushCommand_MeshSetShadowed(SG_Transform* xform, bool shadowed)
     END_COMMAND();
 }
 
+#ifndef WEBCHUGL_NO_VIDEO
 void CQ_PushCommand_VideoUpdate(SG_Video* video)
 {
     const char* path = video->path_OWNED ? video->path_OWNED : "";
@@ -1118,6 +1121,7 @@ void CQ_PushCommand_WebcamUpdate(SG_Webcam* webcam)
     command->capture   = webcam->capture;
     END_COMMAND();
 }
+#endif // WEBCHUGL_NO_VIDEO
 
 #undef cq
 

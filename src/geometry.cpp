@@ -33,6 +33,7 @@
 #include <float.h>
 #include <vector> // ew
 
+#include <glm/glm.hpp>
 #include <glm/gtc/epsilon.hpp>
 
 #include <earcut/earcut.hpp>

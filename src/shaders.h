@@ -311,44 +311,41 @@ static std::unordered_map<std::string, std::string> shader_table = {
         "NORMAL_MAPPING_FUNCTIONS",
         R"glsl(
         // http://www.thetenthplanet.de/archives/1180
-        fn cotangentFrame( N : vec3f, p : vec3f, duv1: vec2f, duv2: vec2f ) -> mat3x3f { 
-            // get edge vectors of the pixel triangle 
-            let dp1 = dpdx( p ); 
-            let dp2 = dpdy( p ); 
-            // solve the linear system 
-            let dp2perp = cross( dp2, N ); 
-            let dp1perp = cross( N, dp1 ); 
+        // Note: dp1, dp2 passed in to avoid dpdx/dpdy in non-uniform control flow
+        fn cotangentFrame( N : vec3f, dp1: vec3f, dp2: vec3f, duv1: vec2f, duv2: vec2f ) -> mat3x3f {
+            // solve the linear system
+            let dp2perp = cross( dp2, N );
+            let dp1perp = cross( N, dp1 );
             let T = dp2perp * duv1.x + dp1perp * duv2.x;
             let B = dp2perp * duv1.y + dp1perp * duv2.y;
-            // construct a scale-invariant frame 
-            let invmax = inverseSqrt( max( dot(T,T), dot(B,B) ) ); 
-            return mat3x3f( T * invmax, B * invmax, N ); 
+            // construct a scale-invariant frame
+            let invmax = inverseSqrt( max( dot(T,T), dot(B,B) ) );
+            return mat3x3f( T * invmax, B * invmax, N );
         }
 
-        fn perturbNormal( v_normal : vec3f, V : vec3f, uv : vec2f, scale : f32, is_front : bool) -> vec3f { 
+        fn perturbNormal( v_normal : vec3f, V : vec3f, uv : vec2f, scale : f32, is_front : bool) -> vec3f {
             let N = normalize(v_normal);
-            var flip = 1.0;
-            if (!is_front) {
-                flip = -1.0;
-            }
-            let duv1 = dpdx( uv ); 
-            let duv2 = dpdy( uv );   
+            // Compute all derivatives FIRST (before any non-uniform control flow)
+            let duv1 = dpdx( uv );
+            let duv2 = dpdy( uv );
+            let dp1 = dpdx( -V );
+            let dp2 = dpdy( -V );
+            // Use select() instead of if-branch to maintain uniform control flow
+            let flip = select(-1.0, 1.0, is_front);
+
+            // Sample normal map (textureSampleLevel is safe in non-uniform flow)
+            var map = textureSampleLevel(u_normal_map, texture_sampler, uv, 0.0).xyz * 2.0 - 1.0;
+            map.x *= scale;
+            map.y *= -scale; // flip y too to be consistent with previous normal map version
+
+            let TBN = cotangentFrame( N, dp1, dp2, duv1, duv2 );
+            var normal = TBN * map;
+            let perturbed = flip * normalize(normal);
 
             // handle case where UVs are not provided (all zero)
-            // then TBN frame will be zeroes, so return normalized v_normal instead
-            if (dot(duv1, duv1) == 0 && dot(duv2, duv2) == 0) {
-                return flip * N;
-            }
-
-            // assume N, the interpolated vertex normal and 
-            // V, the view vector (vertex to eye) 
-            var map = textureSample(u_normal_map, texture_sampler, uv).xyz * 2.0 - 1.0;
-            map.x *= scale;
-            map.y *= -scale; // flip y too to be consistent with previuos normal map version
-
-            let TBN = cotangentFrame( N, -V, duv1, duv2 ); 
-            var normal = TBN * map; 
-            return flip * normalize(normal);
+            // use select() instead of early return to maintain uniform control flow
+            let useFlat = (dot(duv1, duv1) == 0.0) && (dot(duv2, duv2) == 0.0);
+            return select(perturbed, flip * N, useFlat);
         }
         )glsl"
     }
@@ -611,11 +608,11 @@ static const char* phong_shader_string = R"glsl(
             for (var x = -1; x <= 1; x++) {
                 let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
 
-                visibility += textureSampleCompare(
+                visibility += textureSampleCompareLevel(
                     spot_shadow_map_array, shadow_sampler,
                     p.xy + offset, // coords
                     layer, // array layer
-                    p.z - bias // shadowBias
+                    p.z - bias // depth reference
                 );
             }
         }
@@ -641,11 +638,11 @@ static const char* phong_shader_string = R"glsl(
             for (var x = -1; x <= 1; x++) {
                 let offset = vec2<f32>(vec2(x, y)) * oneOverShadowDepthTextureSize;
 
-                visibility += textureSampleCompare(
+                visibility += textureSampleCompareLevel(
                     dir_shadow_map_array, shadow_sampler,
                     p.xy + offset, // coords
                     layer, // array layer
-                    p.z - bias // shadowBias
+                    p.z - bias // depth reference
                 );
             }
         }

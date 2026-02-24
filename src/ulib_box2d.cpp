@@ -61,27 +61,126 @@ body_def)
         if (access_denied) return;                                                     \
     }
 
-// make sure we can fit b2 ids within a t_CKINT
+// b2WorldId always fits in t_CKINT (4 bytes on all platforms)
 static_assert(sizeof(void*) == sizeof(t_CKUINT), "pointer size mismatch");
-static_assert(sizeof(b2WorldId) <= sizeof(t_CKINT), "b2Worldsize mismatch");
+static_assert(sizeof(b2WorldId) <= sizeof(t_CKINT), "b2WorldId size mismatch");
+
+// On desktop (64-bit), b2BodyId/b2ShapeId (8 bytes) fit directly in t_CKINT.
+// On Emscripten (wasm32), t_CKINT is 4 bytes so we use side-table handles.
+#ifndef __EMSCRIPTEN__
+
 static_assert(sizeof(b2BodyId) <= sizeof(t_CKINT), "b2Body size mismatch");
 static_assert(sizeof(b2ShapeId) <= sizeof(t_CKINT), "b2Shape size mismatch");
 
-// accessors
-// custom accessor because size of the b2Id may be less than the corresponding ckobj
-// member field (e.g. 32 byte b2WorldId is stored in the slot of a 64byte t_CKINT)
-// TODO today: refactor GET_B2_ID out and replace
 #define GET_NEXT_B2_ID(type, val)                                                      \
     type val = (*(type*)ARGS);                                                         \
-    static_assert(sizeof(type) <= sizeof(t_CKINT), "b2 id size mismatch");             \
-    GET_NEXT_INT(ARGS); // advance the pointer by amount allocate
+    GET_NEXT_INT(ARGS);
 
 #define GET_B2_ID(type, ptr) (*(type*)ptr)
 #define RETURN_B2_ID(type, id) *((type*)&(RETURN->v_int)) = (id)
-
 #define OBJ_MEMBER_B2_ID(type, ckobj, offset) (*(type*)OBJ_MEMBER_DATA(ckobj, offset))
-
 #define B2_ID_TO_CKINT(id) (*(t_CKINT*)&(id))
+// Desktop compatibility aliases for GET/SET split
+#define OBJ_MEMBER_B2_ID_GET(type, ckobj, offset) OBJ_MEMBER_B2_ID(type, ckobj, offset)
+#define OBJ_MEMBER_B2_ID_SET(type, ckobj, offset, id) (OBJ_MEMBER_B2_ID(type, ckobj, offset) = (id))
+
+#else // __EMSCRIPTEN__ — side-table mapping for 8-byte b2 IDs
+
+#include <vector>
+#include <cstdint>
+
+// Side-table keyed by b2 ID's index1 field. This makes alloc() idempotent:
+// the same b2 ID always maps to the same handle, so event callbacks return
+// the same integer that ChucK code stored when the shape/body was created.
+template <typename T>
+struct B2HandleTable {
+    std::vector<T> entries;
+
+    B2HandleTable() {}
+
+    int32_t alloc(T id) {
+        int32_t handle = id.index1;
+        if (handle >= (int32_t)entries.size())
+            entries.resize(handle + 1, T{});
+        entries[handle] = id;
+        return handle;
+    }
+
+    T get(int32_t handle) const {
+        if (handle >= 0 && handle < (int32_t)entries.size())
+            return entries[handle];
+        return T{};
+    }
+
+    void release(int32_t handle) {
+        if (handle >= 0 && handle < (int32_t)entries.size())
+            entries[handle] = T{};
+    }
+
+    void clear() {
+        entries.clear();
+    }
+};
+
+static B2HandleTable<b2BodyId> g_bodyHandles;
+static B2HandleTable<b2ShapeId> g_shapeHandles;
+
+// Template dispatch: select the right table for a given b2 ID type
+template<typename T> B2HandleTable<T>& b2_handle_table();
+template<> inline B2HandleTable<b2BodyId>& b2_handle_table<b2BodyId>() { return g_bodyHandles; }
+template<> inline B2HandleTable<b2ShapeId>& b2_handle_table<b2ShapeId>() { return g_shapeHandles; }
+
+// if constexpr dispatch: types <= sizeof(t_CKINT) (e.g. b2WorldId) use direct
+// type-punning; larger types (b2BodyId, b2ShapeId) route through the side-table.
+template<typename T>
+inline T b2_id_from_args(void* ptr) {
+    if constexpr (sizeof(T) <= sizeof(t_CKINT))
+        return *(T*)ptr;
+    else
+        return b2_handle_table<T>().get((int32_t)(*(t_CKINT*)ptr));
+}
+
+template<typename T>
+inline void b2_id_return(Chuck_DL_Return* ret, T id) {
+    if constexpr (sizeof(T) <= sizeof(t_CKINT))
+        *(T*)&(ret->v_int) = id;
+    else
+        ret->v_int = (t_CKINT)b2_handle_table<T>().alloc(id);
+}
+
+template<typename T>
+inline T b2_id_from_member(void* data) {
+    if constexpr (sizeof(T) <= sizeof(t_CKINT))
+        return *(T*)data;
+    else
+        return b2_handle_table<T>().get((int32_t)(*(t_CKINT*)data));
+}
+
+template<typename T>
+inline void b2_id_to_member(void* data, T id) {
+    if constexpr (sizeof(T) <= sizeof(t_CKINT))
+        *(T*)data = id;
+    else
+        *(t_CKINT*)data = (t_CKINT)b2_handle_table<T>().alloc(id);
+}
+
+template<typename T>
+inline t_CKINT b2_id_to_ckint(T id) {
+    if constexpr (sizeof(T) <= sizeof(t_CKINT))
+        return *(t_CKINT*)&id;
+    else
+        return (t_CKINT)b2_handle_table<T>().alloc(id);
+}
+
+#define GET_B2_ID(type, ptr)       b2_id_from_args<type>(ptr)
+#define RETURN_B2_ID(type, id)     b2_id_return<type>(RETURN, id)
+#define B2_ID_TO_CKINT(id)         b2_id_to_ckint(id)
+#define GET_NEXT_B2_ID(type, val)  type val = b2_id_from_args<type>(ARGS); GET_NEXT_INT(ARGS);
+#define OBJ_MEMBER_B2_ID(type, ckobj, offset) b2_id_from_member<type>(OBJ_MEMBER_DATA(ckobj, offset))
+#define OBJ_MEMBER_B2_ID_GET(type, ckobj, offset) b2_id_from_member<type>(OBJ_MEMBER_DATA(ckobj, offset))
+#define OBJ_MEMBER_B2_ID_SET(type, ckobj, offset, id) b2_id_to_member<type>(OBJ_MEMBER_DATA(ckobj, offset), id)
+
+#endif // __EMSCRIPTEN__
 
 b2BodyType ckint_to_b2BodyType(t_CKINT type)
 {
@@ -2547,7 +2646,7 @@ static void b2BodyMoveEvent_to_ckobj(CK_DL_API API, Chuck_Object* ckobj,
     // convert complex rot to radians
     OBJ_MEMBER_FLOAT(ckobj, b2BodyMoveEvent_rot_offset)
       = b2Rot_GetAngle(obj->transform.q);
-    OBJ_MEMBER_B2_ID(b2BodyId, ckobj, b2BodyMoveEvent_bodyId_offset) = obj->bodyId;
+    OBJ_MEMBER_B2_ID_SET(b2BodyId, ckobj, b2BodyMoveEvent_bodyId_offset, obj->bodyId);
     OBJ_MEMBER_INT(ckobj, b2BodyMoveEvent_fellAsleep_offset)         = obj->fellAsleep;
 }
 
@@ -2591,6 +2690,10 @@ CK_DLL_SFUN(b2_DestroyWorld)
 {
     ulib_box2d_accessAllowed;
     b2DestroyWorld(GET_B2_ID(b2WorldId, ARGS));
+#ifdef __EMSCRIPTEN__
+    g_bodyHandles.clear();
+    g_shapeHandles.clear();
+#endif
 }
 
 CK_DLL_SFUN(b2_CreateBody)
@@ -2606,7 +2709,15 @@ CK_DLL_SFUN(b2_CreateBody)
 CK_DLL_SFUN(b2_DestroyBody)
 {
     ulib_box2d_accessAllowed;
-    b2DestroyBody(GET_B2_ID(b2BodyId, ARGS));
+#ifdef __EMSCRIPTEN__
+    int32_t handle = (int32_t)(*(t_CKINT*)ARGS);
+    b2BodyId body_id = g_bodyHandles.get(handle);
+    g_bodyHandles.release(handle);
+    GET_NEXT_INT(ARGS);
+#else
+    b2BodyId body_id = GET_B2_ID(b2BodyId, ARGS);
+#endif
+    b2DestroyBody(body_id);
 }
 
 CK_DLL_SFUN(b2_MakeBox)
@@ -3050,8 +3161,6 @@ CK_DLL_SFUN(b2_World_OverlapAABB)
     GET_NEXT_B2_ID(b2WorldId, world_id);
     b2AABB aabb          = vec4_to_b2AABB(GET_NEXT_VEC4(ARGS));
     b2QueryFilter filter = ckobj_to_b2QueryFilter(GET_NEXT_OBJECT(ARGS));
-
-    static_assert(sizeof(b2ShapeId) == sizeof(t_CKINT), "b2ShapeId size mismatch");
 
     Chuck_Object* overlapping_shapes
       = chugin_createCkObj(g_chuck_types.int_array, false, SHRED);
@@ -3583,7 +3692,7 @@ CK_DLL_CTOR(b2ShapeCastInput_ctor)
 static void b2RayResult_to_ckobj(Chuck_Object* ckobj, b2RayResult* obj)
 {
     CK_DL_API API                                                = g_chuglAPI;
-    OBJ_MEMBER_B2_ID(b2ShapeId, ckobj, b2RayResult_shape_offset) = obj->shapeId;
+    OBJ_MEMBER_B2_ID_SET(b2ShapeId, ckobj, b2RayResult_shape_offset, obj->shapeId);
     OBJ_MEMBER_VEC2(ckobj, b2RayResult_point_offset) = { obj->point.x, obj->point.y };
     OBJ_MEMBER_VEC2(ckobj, b2RayResult_normal_offset)
       = { obj->normal.x, obj->normal.y };
@@ -3860,7 +3969,15 @@ CK_DLL_SFUN(b2_CreatePolygonShape)
 CK_DLL_SFUN(b2_DestroyShape)
 {
     ulib_box2d_accessAllowed;
-    b2DestroyShape(GET_B2_ID(b2ShapeId, ARGS), false);
+#ifdef __EMSCRIPTEN__
+    int32_t handle = (int32_t)(*(t_CKINT*)ARGS);
+    b2ShapeId shape_id = g_shapeHandles.get(handle);
+    g_shapeHandles.release(handle);
+    GET_NEXT_INT(ARGS);
+#else
+    b2ShapeId shape_id = GET_B2_ID(b2ShapeId, ARGS);
+#endif
+    b2DestroyShape(shape_id, false);
 }
 
 CK_DLL_SFUN(b2_Shape_IsValid)
@@ -4688,7 +4805,7 @@ CK_DLL_SFUN(b2_Body_get_shapes)
 
     // copy into array
     for (int i = 0; i < shape_count; i++) {
-        t_CKINT shape_id = *(t_CKINT*)(shape_id_array + i);
+        t_CKINT shape_id = B2_ID_TO_CKINT(shape_id_array[i]);
         API->object->array_int_push_back(ck_shape_array, shape_id);
     }
 }
@@ -5149,10 +5266,10 @@ CK_DLL_MFUN(b2_DebugDraw_DrawString)
 static void b2ContactHitEvent_to_ckobj(CK_DL_API API, Chuck_Object* ckobj,
                                        b2ContactHitEvent* obj)
 {
-    OBJ_MEMBER_B2_ID(b2ShapeId, ckobj, b2ContactHitEvent_shapeIdA_offset)
-      = obj->shapeIdA;
-    OBJ_MEMBER_B2_ID(b2ShapeId, ckobj, b2ContactHitEvent_shapeIdB_offset)
-      = obj->shapeIdB;
+    OBJ_MEMBER_B2_ID_SET(b2ShapeId, ckobj, b2ContactHitEvent_shapeIdA_offset,
+                         obj->shapeIdA);
+    OBJ_MEMBER_B2_ID_SET(b2ShapeId, ckobj, b2ContactHitEvent_shapeIdB_offset,
+                         obj->shapeIdB);
     OBJ_MEMBER_VEC2(ckobj, b2ContactHitEvent_point_offset)
       = { obj->point.x, obj->point.y };
     OBJ_MEMBER_VEC2(ckobj, b2ContactHitEvent_normal_offset)
