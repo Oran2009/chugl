@@ -299,7 +299,11 @@ struct App {
     u64 fc;
     f64 lastTime;
     f64 dt;
+#ifdef __EMSCRIPTEN__
+    bool show_fps_title = false; // don't overwrite document.title on web
+#else
     bool show_fps_title = true;
+#endif
 
     // timer for fixed timestep
     nanotime_step_data stepper;
