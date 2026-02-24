@@ -27,6 +27,8 @@
 -----------------------------------------------------------------------------*/
 #pragma once
 
+#include "core/macros.h"  // f32, u32, PI, etc.
+
 struct Vertex {
     f32 x, y, z;    // position
     f32 nx, ny, nz; // normal

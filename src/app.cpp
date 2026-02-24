@@ -30,13 +30,16 @@
 #include <stdlib.h>
 #include <time.h>
 
+#ifndef WEBCHUGL_NO_BOX2D
 #include <box2d/box2d.h>
 // necessary for copying from command
 static_assert(sizeof(u32) == sizeof(b2WorldId), "b2WorldId != u32");
+#endif
 
 #include <GLFW/glfw3.h>
 #include <chuck/chugin.h>
 #include <glfw3webgpu/glfw3webgpu.h>
+#include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
 
 #include <imgui/backends/imgui_impl_glfw.h>
@@ -52,6 +55,25 @@ static_assert(sizeof(u32) == sizeof(b2WorldId), "b2WorldId != u32");
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/html5.h>
+#include <emscripten/emscripten.h>
+#ifdef EMSCRIPTEN_USE_PORT_CONTRIB_GLFW3
+#include <GLFW/emscripten_glfw3.h>
+#endif
+
+// Pre-frame callback for web builds (used by webchugl_main.cpp to run the VM)
+static void (*g_webchugl_pre_frame_fn)(void*) = nullptr;
+static void* g_webchugl_pre_frame_data = nullptr;
+
+extern "C" void webchugl_set_pre_frame_callback(void (*fn)(void*), void* data)
+{
+    g_webchugl_pre_frame_fn = fn;
+    g_webchugl_pre_frame_data = data;
+}
+
+// Letterbox setup for contrib.glfw3: overrides resize observer's computeSize
+// to return shrink-to-fit dimensions, and injects body centering CSS.
+// Defined in webchugl_main.cpp via EM_JS.
+extern "C" void _chugl_setup_letterbox(double ar_x, double ar_y);
 #endif
 
 // #include "camera.cpp"
@@ -294,8 +316,10 @@ struct App {
     // imgui
     bool imgui_disabled = false;
 
+#ifndef WEBCHUGL_NO_BOX2D
     // box2D physics
     b2_SimulateDesc b2_sim_desc;
+#endif
 
     // FreeType
     FT_Library FTLibrary;
@@ -328,15 +352,11 @@ struct App {
         // init rendergraph
         app->rendergraph.init();
 
+#ifndef WEBCHUGL_NO_BOX2D
         // b2 sim defaults
         ASSERT(app->b2_sim_desc.substeps == 4);
+#endif
     }
-
-    // static void emscriptenMainLoop(void* arg)
-    // {
-    //     App* app = (App*)arg;
-    //     gameloop(app);
-    // }
 
     static void start(App* app)
     {
@@ -375,6 +395,18 @@ struct App {
                 glfwTerminate();
                 return;
             }
+
+#ifdef EMSCRIPTEN_USE_PORT_CONTRIB_GLFW3
+            // Make canvas fill the browser window and auto-resize
+            emscripten_glfw_make_canvas_resizable(app->window, "window", nullptr);
+
+            // Let browser handle keyboard shortcuts (Ctrl+T, Ctrl+W, etc.)
+            // by returning true (= let browser handle) when Ctrl or Meta is held.
+            emscripten::glfw3::AddBrowserKeyCallback(
+              [](GLFWwindow*, int, int, int, int mods) -> bool {
+                  return (mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0;
+              });
+#endif
         }
 
         // init graphics context
@@ -416,19 +448,15 @@ struct App {
 
             // load builtin fonts
             io.Fonts->AddFontDefault();
-            // io.Fonts->AddFontFromFileTTF(
-            //   "/Users/Andrew/Google-Drive/Stanford/chugl/assets/fonts/DroidSans.ttf",
-            //   16);
             ImFontConfig font_cfg = ImFontConfig();
             font_cfg.SizePixels   = 16.0f;
             ImFormatString(font_cfg.Name, IM_ARRAYSIZE(font_cfg.Name),
                            "CousineRegular.ttf, %dpx", (int)font_cfg.SizePixels);
-            io.Fonts->AddFontFromMemoryCompressedBase85TTF( // works but no filename
+            io.Fonts->AddFontFromMemoryCompressedBase85TTF(
               cousine_regular_compressed_data_base85, font_cfg.SizePixels, &font_cfg);
 
             // Setup Dear ImGui style
             ImGui::StyleColorsDark();
-            // ImGui::StyleColorsLight();
         }
 
         { // set window callbacks
@@ -453,14 +481,10 @@ struct App {
         // Setup ImGui Platform/Renderer backends
         {
             ImGui_ImplGlfw_InitForOther(app->window, true);
-#ifdef __EMSCRIPTEN__
-            ImGui_ImplGlfw_InstallEmscriptenCanvasResizeCallback("#canvas");
-#endif
             ImGui_ImplWGPU_InitInfo init_info;
             init_info.Device             = app->gctx.device;
             init_info.NumFramesInFlight  = 3;
             init_info.RenderTargetFormat = app->gctx.surface_format;
-            // init_info.DepthStencilFormat = app->gctx.depthTextureDesc.format;
             ImGui_ImplWGPU_Init(&init_info);
         }
 
@@ -483,12 +507,23 @@ struct App {
         // instead pass a callback to emscripten_set_main_loop_arg
         emscripten_set_main_loop_arg(
           [](void* runner) {
-              App::emscriptenMainLoop(runner);
-              //   gameloop(app);
-              // if (glfwWindowShouldClose(app->window)) {
-              //     if (app->callbacks.onExit) app->callbacks.onExit();
-              //     emscripten_cancel_main_loop(); // unregister the main loop
-              // }
+              App* app = (App*)runner;
+
+              // Run pre-frame callback (VM advancement on web)
+              if (g_webchugl_pre_frame_fn) {
+                  g_webchugl_pre_frame_fn(g_webchugl_pre_frame_data);
+              }
+
+              // Frame metrics
+              _calculateFPS(app->window, app->show_fps_title);
+              ++app->fc;
+              f64 currentTime = glfwGetTime();
+              if (app->lastTime == 0) app->lastTime = currentTime;
+              app->dt       = currentTime - app->lastTime;
+              app->lastTime = currentTime;
+
+              _mainLoop(app);
+              Arena::clear(&app->frameArena);
           },
           app, // user data (void *)
           -1,  // FPS (negative means use browser's requestAnimationFrame)
@@ -636,24 +671,6 @@ struct App {
                         }
 
                         CQ_PushCommand_G2A_GamepadState(gamepad_idx, &gp_state);
-
-                        { // debug print
-                          // printf("Gamepad detected: %s\n",
-                          //        glfwGetGamepadName(gamepad_idx));
-                          // printf("Buttons state\n");
-                          // int num_buttons = ARRAY_LENGTH(gp_state.buttons);
-                          // for (int button_idx = 0; button_idx < num_buttons;
-                          //      ++button_idx) {
-                          //     printf("%d: %d\n", button_idx,
-                          //            gp_state.buttons[button_idx]);
-                          // }
-                          // printf("Axes state\n");
-                          // int num_axes = ARRAY_LENGTH(gp_state.axes);
-                          // for (int axes_idx = 0; axes_idx < num_axes; ++axes_idx) {
-                          //     printf("%d: %f\n", axes_idx,
-                          //     gp_state.axes[axes_idx]);
-                          // }
-                        }
                     } else {
                         // disconnected
                         if (was_connected) {
@@ -677,6 +694,7 @@ struct App {
             // ~2.15ms (15%) In DEBUG mode!
             // critical_section_stats.update(stm_since(critical_start));
 
+#ifndef WEBCHUGL_NO_BOX2D
             // physics
             // we intentionally are NOT having a fixed timestep for the sake of
             // simplicity.
@@ -693,6 +711,7 @@ struct App {
                 // log_trace("drawing debug");
                 // b2World_Draw(app->b2_world_id, &debug_draw);
             }
+#endif
         }
 
         // done swapping the double buffer, let chuck know it's good to continue
@@ -700,7 +719,9 @@ struct App {
         // GG.nextFrame()
 
         // grabs waitingShredsLock
-        Event_Broadcast(CHUGL_EventType::NEXT_FRAME, app->ckapi, app->ckvm);
+        if (app->ckapi && app->ckvm) {
+            Event_Broadcast(CHUGL_EventType::NEXT_FRAME, app->ckapi, app->ckvm);
+        }
 
         // ====================
         // end critical section
@@ -750,6 +771,7 @@ struct App {
             return;
         }
 
+#ifndef WEBCHUGL_NO_VIDEO
         { // update webcam textures
             size_t webcam_idx = 0;
             R_Webcam* webcam  = NULL;
@@ -769,6 +791,7 @@ struct App {
                 }
             }
         }
+#endif
 
         // get fresh window info
         f32 aspect = (app->window_fb_width > 0 && app->window_fb_height > 0) ?
@@ -1281,7 +1304,9 @@ struct App {
 
         // ChuGL
         // broadcast WindowCloseEvent
-        Event_Broadcast(CHUGL_EventType::WINDOW_CLOSE, app->ckapi, app->ckvm);
+        if (app->ckapi && app->ckvm) {
+            Event_Broadcast(CHUGL_EventType::WINDOW_CLOSE, app->ckapi, app->ckvm);
+        }
         // block closeable
         if (!CHUGL_Window_Closeable()) glfwSetWindowShouldClose(window, GLFW_FALSE);
     }
@@ -1293,7 +1318,9 @@ struct App {
         // broadcast to chuck
         CHUGL_Window_ContentScale(xscale, yscale);
         // update content scale
-        Event_Broadcast(CHUGL_EventType::CONTENT_SCALE, app->ckapi, app->ckvm);
+        if (app->ckapi && app->ckvm) {
+            Event_Broadcast(CHUGL_EventType::CONTENT_SCALE, app->ckapi, app->ckvm);
+        }
     }
 
     static void _keyCallback(GLFWwindow* window, int key, int scancode, int action,
@@ -1341,7 +1368,9 @@ struct App {
         glfwGetWindowSize(window, &app->window_width, &app->window_height);
         CHUGL_Window_Size(app->window_width, app->window_height, width, height);
         // broadcast to chuck
-        Event_Broadcast(CHUGL_EventType::WINDOW_RESIZE, app->ckapi, app->ckvm);
+        if (app->ckapi && app->ckvm) {
+            Event_Broadcast(CHUGL_EventType::WINDOW_RESIZE, app->ckapi, app->ckvm);
+        }
     }
 
     static void _mouseButtonCallback(GLFWwindow* window, int button, int action,
@@ -1777,6 +1806,15 @@ static void _R_HandleCommand(App* app, SG_Command* command)
               (cmd->min_height <= 0) ? GLFW_DONT_CARE : cmd->min_height,
               (cmd->max_width <= 0) ? GLFW_DONT_CARE : cmd->max_width,
               (cmd->max_height <= 0) ? GLFW_DONT_CARE : cmd->max_height);
+
+#ifdef __EMSCRIPTEN__
+            // On Emscripten, use CSS-based letterboxing instead of
+            // glfwSetWindowAspectRatio (which grows-to-fit rather than
+            // shrinks-to-fit, causing the canvas to exceed viewport bounds).
+            _chugl_setup_letterbox(
+              cmd->aspect_ratio_x > 0 ? cmd->aspect_ratio_x : 0,
+              cmd->aspect_ratio_y > 0 ? cmd->aspect_ratio_y : 0);
+#else
             glfwSetWindowAspectRatio(
               app->window,
               (cmd->aspect_ratio_x <= 0) ? GLFW_DONT_CARE : cmd->aspect_ratio_x,
@@ -1807,6 +1845,7 @@ static void _R_HandleCommand(App* app, SG_Command* command)
             }
 
             glfwSetWindowSize(app->window, width, height);
+#endif
             break;
         }
         case SG_COMMAND_WINDOW_POSITION: {
@@ -1940,11 +1979,13 @@ static void _R_HandleCommand(App* app, SG_Command* command)
             app->imgui_disabled         = cmd->disabled;
             break;
         }
+#ifndef WEBCHUGL_NO_BOX2D
         // b2 ----------------------
         case SG_COMMAND_b2_WORLD_SET: {
             SG_Command_b2World_Set* cmd = (SG_Command_b2World_Set*)command;
             app->b2_sim_desc            = cmd->desc;
         } break;
+#endif
         // component --------------
         case SG_COMMAND_COMPONENT_UPDATE_NAME: {
             SG_Command_ComponentUpdateName* cmd
@@ -2417,6 +2458,7 @@ static void _R_HandleCommand(App* app, SG_Command* command)
                 R_Scene::markPrimitiveStale(Component_GetScene(mesh->scene_id), mesh);
             }
         } break;
+#ifndef WEBCHUGL_NO_VIDEO
         case SG_COMMAND_VIDEO_UPDATE: {
             SG_Command_VideoUpdate* cmd = (SG_Command_VideoUpdate*)command;
             R_Video* video              = Component_GetVideo(cmd->video_id);
@@ -2454,9 +2496,11 @@ static void _R_HandleCommand(App* app, SG_Command* command)
             SG_Command_WebcamUpdate* cmd = (SG_Command_WebcamUpdate*)command;
             R_Webcam::update(cmd);
         } break;
+#endif
         default: {
             log_error("unhandled command type: %d", command->type);
             ASSERT(false);
         }
     }
 }
+

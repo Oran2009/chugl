@@ -31,11 +31,15 @@
 // clang-format off
 
 #include "chugl_defines.h"
-#include "graphics.cpp"
+
+// Core components always included
 #include "geometry.cpp"
 #include "sync.cpp"
 #include "sg_component.cpp" // chugl scenegraph API
 #include "sg_command.cpp"
+
+// Rendering components
+#include "graphics.cpp"
 #include "r_component.cpp" // chugl renderer API
 #include "app.cpp"
 

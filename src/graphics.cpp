@@ -105,14 +105,21 @@ static WGPUAdapter request_adapter(WGPUInstance instance,
         };
 
     // Call to the WebGPU request adapter procedure
+#ifdef __EMSCRIPTEN__
+    // On Emscripten, adapter was pre-created in JS before main() started.
+    // ASYNCIFY is incompatible with MAIN_MODULE (forces DYNCALLS=1), so
+    // the host pre-creates WebGPU objects and stores them on Module.
+    WGPUAdapter preAdapter = (WGPUAdapter)(uintptr_t)EM_ASM_INT({
+        var adapter = Module._preAdapter;
+        if (!adapter) return 0;
+        var handle = WebGPU.mgrAdapter.create(adapter);
+        delete Module._preAdapter;
+        return handle;
+    });
+    return preAdapter;
+#else
     wgpuInstanceRequestAdapter(instance /* equivalent of navigator.gpu */, options,
                                onAdapterRequestEnded, (void*)&userData);
-#ifdef __EMSCRIPTEN__
-    // In the Emscripten environment, the WebGPU adapter request is asynchronous
-    // while (!userData.requestEnded) emscripten_sleep(10);
-    while (!userData.requestEnded) {
-    }
-#endif
     // In theory we should wait until onAdapterReady has been called, which
     // could take some time (what the 'await' keyword does in the JavaScript
     // code). In practice, we know that when the wgpuInstanceRequestAdapter()
@@ -120,6 +127,7 @@ static WGPUAdapter request_adapter(WGPUInstance instance,
     ASSERT(userData.requestEnded);
 
     return userData.adapter;
+#endif
 }
 
 /**
@@ -149,18 +157,24 @@ static WGPUDevice request_device(WGPUAdapter adapter,
         userData.requestEnded = true;
     };
 
+#ifdef __EMSCRIPTEN__
+    // On Emscripten, device was pre-created in JS before main() started.
+    WGPUDevice preDevice = (WGPUDevice)(uintptr_t)EM_ASM_INT({
+        var device = Module._preDevice;
+        if (!device) return 0;
+        var queueId = WebGPU.mgrQueue.create(device.queue);
+        var handle = WebGPU.mgrDevice.create(device, { queueId: queueId });
+        delete Module._preDevice;
+        return handle;
+    });
+    return preDevice;
+#else
     wgpuAdapterRequestDevice(adapter, descriptor, onDeviceRequestEnded,
                              (void*)&userData);
-
-#ifdef __EMSCRIPTEN__
-    // while (!userData.requestEnded) emscripten_sleep(10);
-    while (!userData.requestEnded) {
-    }
-#endif
-
     ASSERT(userData.requestEnded);
 
     return userData.device;
+#endif
 }
 
 static void on_device_error(WGPUErrorType type, char const* message,
@@ -295,7 +309,7 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
     log_trace("adapter created");
 
     { // log adapter info
-        WGPUAdapterInfo adapter_info;
+        WGPUAdapterInfo adapter_info = {};
         wgpuAdapterGetInfo(adapter, &adapter_info);
         log_info("Adapter vendor: %s", adapter_info.vendor);
         log_info("Adapter architecture: %s", adapter_info.architecture);
@@ -310,8 +324,8 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
     }
 
     // set required limits to max supported
-    WGPURequiredLimits requiredLimits = {};
 #ifdef WEBGPU_BACKEND_WGPU
+    WGPURequiredLimits requiredLimits = {};
     WGPUSupportedLimits supportedLimits = {};
     bool success = wgpuAdapterGetLimits(adapter, &supportedLimits);
     UNUSED_VAR(success);
@@ -334,6 +348,16 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
     const u32 requiredFeaturesCount = ARRAY_LENGTH(requiredFeatures);
     log_trace("required features: %d", ARRAY_LENGTH(requiredFeatures));
 #else
+    // On Emscripten, don't call wgpuAdapterGetLimits — the Emscripten SDK's
+    // WGPUSupportedLimits struct contains deprecated fields (e.g.
+    // maxInterStageShaderComponents) that Chrome no longer provides, causing
+    // the JS shim to write undefined into the integer heap.
+    // Set only the limits we actually use to safe WebGPU spec minimums.
+    context->limits                                = {};
+    context->limits.maxTextureArrayLayers          = 256;
+    context->limits.minUniformBufferOffsetAlignment = 256;
+    context->limits.minStorageBufferOffsetAlignment = 256;
+
     const u32 requiredFeaturesCount   = 0;
     WGPUFeatureName* requiredFeatures = NULL;
 #endif
@@ -343,7 +367,9 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
     deviceDescriptor.label                = "ChuGL Device";
     deviceDescriptor.requiredFeatureCount = requiredFeaturesCount;
     deviceDescriptor.requiredFeatures     = requiredFeatures;
+#ifdef WEBGPU_BACKEND_WGPU
     deviceDescriptor.requiredLimits       = &requiredLimits;
+#endif
     deviceDescriptor.defaultQueue         = { NULL, "ChuGL queue" };
     deviceDescriptor.deviceLostCallback
       = [](WGPUDeviceLostReason reason, char const* message, void* /* pUserData */) {
@@ -351,13 +377,19 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
             if (message) log_error(" (%s)", message);
         };
     deviceDescriptor.deviceLostUserdata          = NULL;
+#ifndef __EMSCRIPTEN__
     deviceDescriptor.uncapturedErrorCallbackInfo = {
         NULL, on_device_error, NULL /* pUserData */
     };
+#endif
 
     context->device = request_device(adapter, &deviceDescriptor);
     if (!context->device) return false;
     log_trace("device created");
+
+#ifdef __EMSCRIPTEN__
+    wgpuDeviceSetUncapturedErrorCallback(context->device, on_device_error, NULL);
+#endif
 
     { // set debug callbacks
       // #if defined(WEBGPU_BACKEND_WGPU)
@@ -378,7 +410,7 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
     // determine swapchain format
     // note: we try to always pick an 8unorm format
     {
-        WGPUSurfaceCapabilities surface_capabilities;
+        WGPUSurfaceCapabilities surface_capabilities = {};
         wgpuSurfaceGetCapabilities(context->surface, adapter, &surface_capabilities);
         context->surface_format = WGPUTextureFormat_Undefined;
         for (int i = 0; i < surface_capabilities.formatCount; i++) {

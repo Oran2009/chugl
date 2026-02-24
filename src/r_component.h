@@ -45,7 +45,9 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#ifndef WEBCHUGL_NO_VIDEO
 #include <pl/pl_mpeg.h>
+#endif
 
 // =============================================================================
 // scenegraph data structures
@@ -845,6 +847,7 @@ struct R_Font {
                                      const char* text);
 };
 
+#ifndef WEBCHUGL_NO_VIDEO
 // =============================================================================
 // R_Video
 // =============================================================================
@@ -876,6 +879,7 @@ struct R_Webcam : public R_Component {
     static void updateTexture(GraphicsContext* gctx, R_Webcam* webcam);
     static void update(SG_Command_WebcamUpdate* cmd);
 };
+#endif // WEBCHUGL_NO_VIDEO
 
 // =============================================================================
 // Component Manager API
@@ -909,9 +913,11 @@ R_Pass* Component_CreatePass(SG_ID pass_id, WGPUDevice device);
 R_Buffer* Component_CreateBuffer(SG_ID id);
 R_Light* Component_CreateLight(SG_ID id, SG_LightDesc* desc, WGPUDevice device,
                                WGPULimits* limits);
+#ifndef WEBCHUGL_NO_VIDEO
 R_Video* Component_CreateVideo(GraphicsContext* gctx, SG_ID id, const char* filename,
                                SG_Command_VideoUpdate* cmd);
 R_Webcam* Component_CreateWebcam(SG_Command_WebcamCreate* cmd);
+#endif
 
 R_Component* Component_GetComponent(SG_ID id);
 WGPUSampler Component_GetSampler(GraphicsContext* gctx, SG_Sampler sampler);
@@ -929,14 +935,18 @@ R_Font* Component_GetFont(GraphicsContext* gctx, FT_Library library,
 R_Pass* Component_GetPass(SG_ID id);
 R_Buffer* Component_GetBuffer(SG_ID id);
 R_Light* Component_GetLight(SG_ID id);
+#ifndef WEBCHUGL_NO_VIDEO
 R_Video* Component_GetVideo(SG_ID id);
 R_Webcam* Component_GetWebcam(SG_ID id);
+#endif
 
 // be careful to not delete components while iterating
 // returns false upon reachign end of material arena
 bool Component_MaterialIter(size_t* i, R_Material** material);
+#ifndef WEBCHUGL_NO_VIDEO
 bool Component_VideoIter(size_t* i, R_Video** video);
 bool Component_WebcamIter(size_t* i, R_Webcam** webcam);
+#endif
 
 // component manager initialization
 void Component_Init(GraphicsContext* gctx);
@@ -2449,11 +2459,12 @@ struct G_Graph {
                         // here
                         ds.depthReadOnly = false;
 
-                        // Stencil setup, mandatory but unused
+                        // Stencil setup: Depth32Float has no stencil, so use Undefined ops
+                        // Chrome WebGPU rejects Clear/Store on depth-only formats
                         ds.stencilClearValue = 0;
-                        ds.stencilLoadOp     = WGPULoadOp_Clear;
-                        ds.stencilStoreOp    = WGPUStoreOp_Store;
-                        ds.stencilReadOnly   = false;
+                        ds.stencilLoadOp     = WGPULoadOp_Undefined;
+                        ds.stencilStoreOp    = WGPUStoreOp_Undefined;
+                        ds.stencilReadOnly   = true;
 
                         render_pass_desc.depthStencilAttachment = &ds;
                     }

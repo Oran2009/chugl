@@ -36,12 +36,18 @@
 #define SOKOL_TIME_IMPL
 #include <sokol/sokol_time.h>
 
+#ifndef WEBCHUGL_NO_VIDEO
 #define PL_MPEG_IMPLEMENTATION
 #include <pl/pl_mpeg.h>
+#endif
 
 #define NANOTIME_IMPLEMENTATION
 #include <nanotime/nanotime.h>
 
+#ifndef __EMSCRIPTEN__
 #include <tinyfiledialogs/tinyfiledialogs.c>
+#endif
 
+#ifndef __EMSCRIPTEN__
 #include <tinycthread/tinycthread.c>
+#endif

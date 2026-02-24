@@ -34,7 +34,9 @@
 #include "ulib_helper.h"
 
 #include <glm/gtx/quaternion.hpp>
+#ifndef WEBCHUGL_NO_VIDEO
 #include <sr_webcam/include/sr_webcam.h>
+#endif
 
 // ============================================================================
 // SG_Transform definitions
@@ -754,8 +756,10 @@ static Arena SG_TextArena;
 static Arena SG_PassArena;
 static Arena SG_BufferArena;
 static Arena SG_LightArena;
+#ifndef WEBCHUGL_NO_VIDEO
 static Arena SG_VideoArena;
 static Arena SG_WebcamArena;
+#endif
 
 // locators (TODO switch to table)
 static hashmap* locator = NULL;
@@ -839,8 +843,10 @@ void SG_Init(const Chuck_DL_Api* api)
     Arena::init(&SG_PassArena, sizeof(SG_Pass) * 32);
     Arena::init(&SG_BufferArena, sizeof(SG_Pass) * 64);
     Arena::init(&SG_LightArena, sizeof(SG_Light) * 32);
+#ifndef WEBCHUGL_NO_VIDEO
     Arena::init(&SG_VideoArena, sizeof(SG_Video) * 16);
     Arena::init(&SG_WebcamArena, sizeof(SG_Webcam) * 8);
+#endif
 
     // init gc state
     Arena::init(&_gc_queue_a, sizeof(SG_ID) * 64);
@@ -1206,6 +1212,7 @@ SG_Light* SG_CreateLight(Chuck_Object* ckobj)
     return light;
 }
 
+#ifndef WEBCHUGL_NO_VIDEO
 SG_Video* SG_CreateVideo(Chuck_Object* ckobj, t_CKUINT id_offset)
 {
     CK_DL_API API = g_chuglAPI;
@@ -1311,6 +1318,7 @@ SG_Webcam* SG_CreateWebcam(Chuck_Object* ckobj, Chuck_VM_Shred* shred, int devic
 
     return webcam;
 }
+#endif // WEBCHUGL_NO_VIDEO
 
 SG_Component* SG_GetComponent(SG_ID id)
 {
@@ -1414,6 +1422,7 @@ SG_Light* SG_GetLight(SG_ID id)
     return (SG_Light*)component;
 }
 
+#ifndef WEBCHUGL_NO_VIDEO
 SG_Video* SG_GetVideo(SG_ID id)
 {
     SG_Component* component = SG_GetComponent(id);
@@ -1427,6 +1436,7 @@ SG_Webcam* SG_GetWebcam(SG_ID id)
     ASSERT(component == NULL || component->type == SG_COMPONENT_WEBCAM);
     return (SG_Webcam*)component;
 }
+#endif
 
 // ============================================================================
 // SG Garbage Collector

@@ -29,13 +29,19 @@
 
 #include <chuck/chugin.h>
 
+#ifndef __EMSCRIPTEN__
 #include <condition_variable>
+#endif
 #include <unordered_map>
 
 #include "core/memory.h"
 #include "core/spinlock.h"
 
+#ifdef __EMSCRIPTEN__
+#include <GLFW/glfw3.h>
+#else
 #include <glfw/include/GLFW/glfw3.h>
+#endif
 
 #include "ulib_helper.h"
 
@@ -45,9 +51,11 @@ static spinlock waitingShredsLock;
 static u64 waitingShreds              = 0; // guarded by waitingShredsLock
 static i64 waiting_shreds_frame_count = 0; // guarded by waitingShredsLock
 
+#ifndef __EMSCRIPTEN__
 static std::mutex gameLoopLock; // lock for condition variable
 static std::condition_variable gameLoopConditionVar;
 static bool shouldRender = false;
+#endif
 
 // ============================================================================
 // Shared Audio/Graphics Thread State
@@ -614,15 +622,23 @@ int Sync_NumShredsRegistered()
 
 void Sync_WaitOnUpdateDone()
 {
+#ifdef __EMSCRIPTEN__
+    return; // Main loop drives rendering directly, no blocking
+#else
     std::unique_lock<std::mutex> lock(gameLoopLock);
     gameLoopConditionVar.wait(lock, []() { return shouldRender; });
     shouldRender = false;
+#endif
 }
 
 void Sync_SignalUpdateDone()
 {
+#ifdef __EMSCRIPTEN__
+    return; // No graphics thread to signal
+#else
     std::unique_lock<std::mutex> lock(gameLoopLock);
     shouldRender = true;
     lock.unlock();
     gameLoopConditionVar.notify_all();
+#endif
 }
