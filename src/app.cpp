@@ -389,8 +389,16 @@ struct App {
             glfwWindowHint(GLFW_FLOATING,
                            CHUGL_Window_Floating() ? GLFW_TRUE : GLFW_FALSE);
 
+#ifdef __EMSCRIPTEN__
+            // Save and restore document.title around glfwCreateWindow,
+            // which unconditionally sets it to the GLFW window title
+            EM_ASM({ document._chugl_saved_title = document.title; });
+#endif
             app->window = glfwCreateWindow((int)window_size.x, (int)window_size.y,
                                            "ChuGL " CHUGL_VERSION_STRING, NULL, NULL);
+#ifdef __EMSCRIPTEN__
+            EM_ASM({ document.title = document._chugl_saved_title; delete document._chugl_saved_title; });
+#endif
 
             // TODO: set window user pointer to CHUGL_App
 
