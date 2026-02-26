@@ -63,11 +63,18 @@ static_assert(sizeof(u32) == sizeof(b2WorldId), "b2WorldId != u32");
 // Pre-frame callback for web builds (used by webchugl_main.cpp to run the VM)
 static void (*g_webchugl_pre_frame_fn)(void*) = nullptr;
 static void* g_webchugl_pre_frame_data = nullptr;
+// When true, the emscripten main loop stops on the next frame
+static bool g_webchugl_stop_requested = false;
 
 extern "C" void webchugl_set_pre_frame_callback(void (*fn)(void*), void* data)
 {
     g_webchugl_pre_frame_fn = fn;
     g_webchugl_pre_frame_data = data;
+}
+
+extern "C" void webchugl_stop_main_loop()
+{
+    g_webchugl_stop_requested = true;
 }
 
 // Letterbox setup for contrib.glfw3: overrides resize observer's computeSize
@@ -525,6 +532,12 @@ struct App {
         // instead pass a callback to emscripten_set_main_loop_arg
         emscripten_set_main_loop_arg(
           [](void* runner) {
+              // Stop the loop if destroy was requested
+              if (g_webchugl_stop_requested) {
+                  emscripten_cancel_main_loop();
+                  return;
+              }
+
               App* app = (App*)runner;
 
               // Run pre-frame callback (VM advancement on web)
