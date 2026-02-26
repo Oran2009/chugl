@@ -531,9 +531,6 @@ struct App {
         // main loop
         log_trace("entering  main loop");
 #ifdef __EMSCRIPTEN__
-        // Store app pointer for XR hooks
-        g_xr_app_ptr = app;
-
         // https://emscripten.org/docs/api_reference/emscripten.h.html#c.emscripten_set_main_loop_arg
         // can't have an infinite loop in emscripten
         // instead pass a callback to emscripten_set_main_loop_arg
