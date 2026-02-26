@@ -42,12 +42,10 @@ static_assert(sizeof(u32) == sizeof(b2WorldId), "b2WorldId != u32");
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#ifndef WEBCHUGL_NO_IMGUI
 #include <imgui/backends/imgui_impl_glfw.h>
 #include <imgui/backends/imgui_impl_wgpu.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h> // ImPool<>, ImHashData
-#endif
 
 #include <nanotime/nanotime.h>
 #include <sokol/sokol_time.h>
@@ -98,11 +96,8 @@ extern "C" void _chugl_setup_letterbox(double ar_x, double ar_y);
 #include "core/hashmap.h"
 #include "core/log.h"
 
-#ifndef WEBCHUGL_NO_IMGUI
 #include "compressed_fonts.h"
-#endif
 
-#ifndef WEBCHUGL_NO_IMGUI
 // Usage:
 //  static ImDrawDataSnapshot snapshot; // Important: make persistent accross
 //  frames to reuse buffers. snapshot.SnapUsingSwap(ImGui::GetDrawData(),
@@ -210,7 +205,6 @@ static WGPUTextureView ImGui_ImplWGPU_GetTextureId(ImTextureID id, void* user)
     desc = { tex->gpu_texture, WGPUTextureViewDimension_2D, 0, 1, 0, 1 };
     return cache->textureView(desc);
 }
-#endif // WEBCHUGL_NO_IMGUI
 
 struct TickStats {
     u64 fc    = 0;
@@ -468,7 +462,6 @@ struct App {
         // initialize R_Component manager
         Component_Init(&app->gctx);
 
-#ifndef WEBCHUGL_NO_IMGUI
         { // initialize imgui
             // Setup Dear ImGui context
             IMGUI_CHECKVERSION();
@@ -494,7 +487,6 @@ struct App {
             // Setup Dear ImGui style
             ImGui::StyleColorsDark();
         }
-#endif
 
         { // set window callbacks
             glfwSetWindowUserPointer(app->window, app);
@@ -515,7 +507,6 @@ struct App {
                               //   https://github.com/glfw/glfw/issues/1968)
         }
 
-#ifndef WEBCHUGL_NO_IMGUI
         // Setup ImGui Platform/Renderer backends
         {
             ImGui_ImplGlfw_InitForOther(app->window, true);
@@ -525,20 +516,17 @@ struct App {
             init_info.RenderTargetFormat = app->gctx.surface_format;
             ImGui_ImplWGPU_Init(&init_info);
         }
-#endif
 
         // trigger window resize callback to set up imgui
         int width, height;
         glfwGetFramebufferSize(app->window, &width, &height);
         _onFramebufferResize(app->window, width, height);
 
-#ifndef WEBCHUGL_NO_IMGUI
         // initialize imgui frame (should be threadsafe as long as graphics
         // shreds start with GG.nextFrame() => now)
         ImGui_ImplWGPU_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-#endif
 
         // main loop
         log_trace("entering  main loop");
@@ -677,17 +665,12 @@ struct App {
             - exposes a gameloop to chuck, gauranteed to be executed once per
         frame deadlock shouldn't happen because both locks are never held at the
         same time */
-#ifndef WEBCHUGL_NO_IMGUI
         bool do_ui = !app->imgui_disabled;
-#else
-        bool do_ui = false;
-#endif
 
         {
             CQ_SwapQueues(); // ~ .0001ms
 
             // u64 critical_start = stm_now();
-#ifndef WEBCHUGL_NO_IMGUI
             // Rendering
             if (do_ui) {
                 ImGui::Render();
@@ -695,7 +678,6 @@ struct App {
                 // copy imgui draw data for rendering later
                 snapshot.SnapUsingSwap(ImGui::GetDrawData(), ImGui::GetTime());
             }
-#endif
 
             // imgui and window callbacks
             CHUGL_Zero_MouseDeltasAndClickState();
@@ -737,7 +719,6 @@ struct App {
                 }
             }
 
-#ifndef WEBCHUGL_NO_IMGUI
             if (do_ui) {
                 // reset imgui
                 ImGui_ImplWGPU_NewFrame();
@@ -748,7 +729,6 @@ struct App {
                 ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
                                              ImGuiDockNodeFlags_PassthruCentralNode);
             }
-#endif
             // ~2.15ms (15%) In DEBUG mode!
             // critical_section_stats.update(stm_since(critical_start));
 
@@ -1302,7 +1282,6 @@ struct App {
         // and with imgui pass
         app->rendergraph.executeAndReset(app->gctx.device, app->gctx.commandEncoder);
 
-#ifndef WEBCHUGL_NO_IMGUI
         // imgui render pass
         if (do_ui && !resized_this_frame) {
             WGPURenderPassColorAttachment imgui_color_attachment = {};
@@ -1328,7 +1307,6 @@ struct App {
             wgpuRenderPassEncoderEnd(render_pass);
             wgpuRenderPassEncoderRelease(render_pass);
         }
-#endif
 
         GraphicsContext::presentFrame(&app->gctx);
     }
@@ -1438,10 +1416,8 @@ struct App {
     {
         // log_debug("mouse button callback");
 
-#ifndef WEBCHUGL_NO_IMGUI
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
-#endif
 
         App* app = (App*)glfwGetWindowUserPointer(window);
         UNUSED_VAR(app);
@@ -1461,10 +1437,8 @@ struct App {
 
     static void _scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
     {
-#ifndef WEBCHUGL_NO_IMGUI
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
-#endif
 
         App* app = (App*)glfwGetWindowUserPointer(window);
         UNUSED_VAR(app);
@@ -1474,10 +1448,8 @@ struct App {
 
     static void _cursorPositionCallback(GLFWwindow* window, double xpos, double ypos)
     {
-#ifndef WEBCHUGL_NO_IMGUI
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse) return;
-#endif
 
         App* app = (App*)glfwGetWindowUserPointer(window);
         UNUSED_VAR(app);
