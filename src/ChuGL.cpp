@@ -862,7 +862,7 @@ CK_DLL_SFUN(chugl_check_vtable_offset)
 // after init components have been created (default camera, scene etc)
 // call this function to make the necessary scenegraph/rendergraph connections.
 // useful for resetting state e.g. between examples
-void chugl_init_default_setup_impl()
+extern "C" void chugl_init_default_setup_impl()
 {
     // TODO set camera defaults here
     SG_Pass* root_pass   = SG_GetPass(gg_config.root_pass_id);
