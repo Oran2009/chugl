@@ -46,7 +46,6 @@
 #include FT_FREETYPE_H
 
 #include <pl/pl_mpeg.h>
-#endif
 
 // =============================================================================
 // scenegraph data structures
