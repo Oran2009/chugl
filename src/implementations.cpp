@@ -36,7 +36,6 @@
 #define SOKOL_TIME_IMPL
 #include <sokol/sokol_time.h>
 
-#ifndef WEBCHUGL_NO_VIDEO
 #define PL_MPEG_IMPLEMENTATION
 #include <pl/pl_mpeg.h>
 #endif

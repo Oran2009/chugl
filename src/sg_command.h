@@ -587,7 +587,6 @@ struct SG_Command_MeshSetShadowed : public SG_Command {
     b32 shadowed;
 };
 
-#ifndef WEBCHUGL_NO_VIDEO
 // video commands -----------------------------------------------------
 struct SG_Command_VideoUpdate : public SG_Command {
     SG_ID video_id;
@@ -614,6 +613,7 @@ struct SG_Command_VideoTextureMode : public SG_Command {
     SG_Video_TextureMode mode;
 };
 
+#ifndef WEBCHUGL_NO_WEBCAM
 // webcam commands -----------------------------------------------------
 
 struct _sr_webcam_device;
@@ -630,7 +630,7 @@ struct SG_Command_WebcamUpdate : public SG_Command {
     bool freeze;
     bool capture;
 };
-#endif // WEBCHUGL_NO_VIDEO
+#endif // WEBCHUGL_NO_WEBCAM
 
 // ============================================================================
 // Graphics to Audio Commands
@@ -822,17 +822,17 @@ void CQ_PushCommand_ShadowAddMesh(SG_Light* light, SG_Transform* xform,
                                   bool add_children, bool add);
 void CQ_PushCommand_MeshSetShadowed(SG_Transform* xform, bool shadowed);
 
-#ifndef WEBCHUGL_NO_VIDEO
 // video
 void CQ_PushCommand_VideoUpdate(SG_Video* video);
 void CQ_PushCommand_VideoSeek(SG_ID video_id, double time);
 void CQ_PushCommand_VideoRate(SG_ID video_id, double rate, bool loop);
 void CQ_PushCommand_VideoTextureMode(SG_Video* video, int mode);
 
+#ifndef WEBCHUGL_NO_WEBCAM
 // webcam
 void CQ_PushCommand_WebcamCreate(SG_Webcam* webcam, sr_webcam_device* device);
 void CQ_PushCommand_WebcamUpdate(SG_Webcam* webcam);
-#endif
+#endif // WEBCHUGL_NO_WEBCAM
 
 // ============================================================================
 // Commands from Graphics Thread --> Audio Thread
