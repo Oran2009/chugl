@@ -38,7 +38,6 @@
 
 #define PL_MPEG_IMPLEMENTATION
 #include <pl/pl_mpeg.h>
-#endif
 
 #define NANOTIME_IMPLEMENTATION
 #include <nanotime/nanotime.h>
