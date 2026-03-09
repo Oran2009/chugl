@@ -48,7 +48,6 @@
 #include "ulib_buffer.cpp"
 #include "ulib_light.cpp"
 
-#ifndef WEBCHUGL_NO_VIDEO
 #include "ulib_video.cpp"
 #endif
 
@@ -1056,7 +1055,6 @@ CK_DLL_QUERY(ChuGL)
     ulib_pass_query(QUERY);
     ulib_text_query(QUERY);
 
-#ifndef WEBCHUGL_NO_VIDEO
     ulib_video_query(QUERY);
 #endif
 

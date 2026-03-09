@@ -802,7 +802,7 @@ struct App {
             return;
         }
 
-#ifndef WEBCHUGL_NO_VIDEO
+#ifndef WEBCHUGL_NO_WEBCAM
         { // update webcam textures
             size_t webcam_idx = 0;
             R_Webcam* webcam  = NULL;
@@ -810,6 +810,7 @@ struct App {
                 R_Webcam::updateTexture(&app->gctx, webcam);
             }
         }
+#endif // WEBCHUGL_NO_WEBCAM
 
         { // decode all current video textures
             // ==optimize== threadpool for decoding
@@ -822,7 +823,6 @@ struct App {
                 }
             }
         }
-#endif
 
         // get fresh window info
         f32 aspect = (app->window_fb_width > 0 && app->window_fb_height > 0) ?
@@ -2489,7 +2489,6 @@ static void _R_HandleCommand(App* app, SG_Command* command)
                 R_Scene::markPrimitiveStale(Component_GetScene(mesh->scene_id), mesh);
             }
         } break;
-#ifndef WEBCHUGL_NO_VIDEO
         case SG_COMMAND_VIDEO_UPDATE: {
             SG_Command_VideoUpdate* cmd = (SG_Command_VideoUpdate*)command;
             R_Video* video              = Component_GetVideo(cmd->video_id);
@@ -2519,6 +2518,7 @@ static void _R_HandleCommand(App* app, SG_Command* command)
             R_Video* video                   = Component_GetVideo(cmd->video_id);
             if (video) video->texture_mode = cmd->mode;
         } break;
+#ifndef WEBCHUGL_NO_WEBCAM
         case SG_COMMAND_WEBCAM_CREATE: {
             SG_Command_WebcamCreate* cmd = (SG_Command_WebcamCreate*)command;
             Component_CreateWebcam(cmd);
@@ -2527,11 +2527,10 @@ static void _R_HandleCommand(App* app, SG_Command* command)
             SG_Command_WebcamUpdate* cmd = (SG_Command_WebcamUpdate*)command;
             R_Webcam::update(cmd);
         } break;
-#endif
+#endif // WEBCHUGL_NO_WEBCAM
         default: {
             log_error("unhandled command type: %d", command->type);
             ASSERT(false);
         }
     }
 }
-
