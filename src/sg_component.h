@@ -41,7 +41,6 @@
 #include <iostream> // std::string
 
 #include <pl/pl_mpeg.h>
-#endif
 
 // forward decls
 struct SG_Light;
