@@ -552,6 +552,7 @@ static const char* phong_shader_string = R"glsl(
     @group(1) @binding(10) var u_emissive_map: texture_2d<f32>;
     @group(1) @binding(11) var u_normal_map: texture_2d<f32>;
 
+
     // envmap params
     const ENVMAP_METHOD_NONE = 0;
     const ENVMAP_METHOD_REFLECTION = 1;
@@ -564,7 +565,11 @@ static const char* phong_shader_string = R"glsl(
 
     @group(1) @binding(12) var<uniform> u_envmap_method : i32;
     @group(1) @binding(13) var<uniform> u_envmap_ratio : f32; // refraction ratio
-    // @group(1) @binding(14) var u_envmap_sampler : sampler;
+
+    // WTF NEED TO DECLARE BINDINGS IN ORDER...WGSL PARSER IS SHIT
+    @group(1) @binding(14) var<uniform> u_texture_offset : vec2f;
+    @group(1) @binding(15) var<uniform> u_texture_scale : vec2f;
+
     @group(1) @binding(16) var<uniform> u_envmap_blend : i32;
     @group(1) @binding(17) var<uniform> u_envmap_intensity : f32;
 
@@ -661,13 +666,15 @@ static const char* phong_shader_string = R"glsl(
         let viewVector = u_frame.camera_pos - in.v_worldpos;
         let viewDir = normalize(viewVector);  // direction from camera to this frag
 
-        var normal = perturbNormal(in.v_normal, viewVector, in.v_uv, u_normal_factor, is_front);
+        var uv = in.v_uv * u_texture_scale + u_texture_offset;
+
+        var normal = perturbNormal(in.v_normal, viewVector, uv, u_normal_factor, is_front);
 
         // material color properties (ignore alpha channel for now)
-        let diffuseTex = textureSample(u_diffuse_map, texture_sampler, in.v_uv);
-        let specularTex = textureSample(u_specular_map, texture_sampler, in.v_uv);
-        let aoTex = textureSample(u_ao_map, texture_sampler, in.v_uv);
-        let emissiveTex = textureSample(u_emissive_map, texture_sampler, in.v_uv);
+        let diffuseTex = textureSample(u_diffuse_map, texture_sampler, uv);
+        let specularTex = textureSample(u_specular_map, texture_sampler, uv);
+        let aoTex = textureSample(u_ao_map, texture_sampler, uv);
+        let emissiveTex = textureSample(u_emissive_map, texture_sampler, uv);
         // factor ao into diffuse
         var diffuse_color = u_diffuse_color.rgb * srgbToLinear(diffuseTex.rgb);
         diffuse_color = mix(diffuse_color, diffuse_color * aoTex.r, u_ao_factor);
@@ -1749,13 +1756,11 @@ const char* skybox_shader_string = R"glsl(
     #include FRAME_UNIFORMS
     #include ENVIRONMENT_MAP_UNIFORMS
 
-    // need at least 1 binding so getBindGroupLayout doesn't crash...
     @group(1) @binding(0) var u_envmap_sampler: sampler;
 
     struct VSOutput {
         @builtin(position) position: vec4f,
         @location(0) pos: vec4f,
-        // @location(0) v_skybox_normal: vec3f,
     };
 
     var<private> pos : array<vec2f, 3> = array(
@@ -1777,27 +1782,14 @@ const char* skybox_shader_string = R"glsl(
     fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VSOutput {
         var output : VSOutput;
         output.position = vec4f(pos[vertexIndex], 1, 1);
-        output.pos = output.position;
-
-        // output.v_skybox_normal = skybox_positions[vertexIndex];
-        // var position = u_frame.projection * u_frame.view * vec4f(output.v_skybox_normal, 1.0);
-        // position.z = position.w;  // force z to be 1.0 after perspective division
-        // output.position = position;
-
+        output.pos = u_frame.projection_view_inverse_no_translation * output.position;
         return output;
     }
 
     @fragment
     fn fs_main(vsOut: VSOutput) -> @location(0) vec4f {
-        let t = u_frame.projection_view_inverse_no_translation * vsOut.pos;
-        var normal = normalize(t.xyz / t.w) * vec3f(1, 1, -1);
+        var normal = normalize(vsOut.pos.xyz / vsOut.pos.w) * vec3f(1, 1, -1);
         return u_frame.background_color * srgbToLinear(textureSample(u_envmap, u_envmap_sampler, normal));
-
-        // let tmp = textureSample(u_envmap, u_envmap_sampler, normalize(t.xyz / t.w) * vec3f(1, 1, -1));
-        // return vec4f(1.0);
-
-        // let color = u_frame.background_color * srgbToLinear(textureSample(u_envmap, u_envmap_sampler, vsOut.v_skybox_normal));
-        // return color;
     }
 )glsl";
 

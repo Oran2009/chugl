@@ -4,18 +4,29 @@
 - add `TextureLoadDesc.srgb` for loading image data into srgb textures
 - Add YCrCb video decoding mode to `Video`
 - Updated cmake to build on linux. (thanks Lejun)
-- add new operator overloads `GGen[] --> GGen` and `GGen[] --< GGen` for grucking / ungrucking arrays of GGens all at once. (thanks Brendan)
+- add new operator overloads `GGen[] --> GGen` and `GGen[] --< GGen` for grucking / ungrucking arrays of GGens all at once (thanks Brendan)
+- add `Color.srgb(vec3)` and `Color.linear(vec3)` for converting between linear and srgb color spaces
+- add `PhongMaterial.uvOffset()` and `PhongMaterial.uvScale()` for repeating/scrolling textures
+- `Webcam` now has linux support! 
+- add `int GWindow.minimized()` to detect if the window is currently minimized (thanks to Nick for the misunderstanding)
 - Examples
   - `deep/video-ycrcb.ck`: demonstrating the YCrCb decoding mode on `Video` UGen
+  - `deep/skybox-shader.ck`: procedural sky rendering via custom skybox shader
 - Bug fixes
   - fixed bug of FlatMaterial.emissive not being properly set
   - fixed crash caused by using a Material with no Shader
   - fixed bug where main camera (`GG.camera()`) was being incorrectly replaced upon instantiating a new `GScene` 
   - fixed segfault caused by setting a null texture to `Material.texture(int, Texture)`
   - `GGen.detach()` and `GGen.detachChildren()` now correctly set the `.parent()` pointers of all detached children to null.
+  - `GVideo.rate()` now properly returns a float
+  - fix segfault caused by GText on Linux
+  - fix rare race condition on startup caused by the graphics thread broadcasting WindowResizeEvent
+  - fix segfault caused by walking scenegraph and calling `update(float dt)` during GG.autoUpdate()
 - General improvements:
   - add warning when setting RenderPass.clear(false) on a GScene that has a skybox
   - setting `FlatMaterial.color()` and `PhongMaterial.color()` no longer override the alpha value to be 1
+  - improved performance of default skybox material shader
+  - Material uniform updates are now batch-written to the GPU, improving renderer performance
 
 ## 0.2.9 (alpha)
 - Bug fixes

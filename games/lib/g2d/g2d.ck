@@ -118,8 +118,17 @@ public class G2D extends GGen
 	vec2 screen_top_left;
 	vec2 screen_top_right;
 	vec2 screen_bot_right;
+	vec2 screen_center;
 	float screen_w;
 	float screen_h;
+
+
+	int mouse_left;
+	int mouse_left_down;
+	int mouse_left_up;
+	int mouse_right;
+	int mouse_right_down;
+	int mouse_right_up;
 
 	fun void _updateScreenBounds() {
 		n2w(-1, -1) => screen_min;
@@ -128,7 +137,15 @@ public class G2D extends GGen
 		screen_max.y - screen_min.y => screen_h;
 		@(screen_min.x, screen_max.y) => screen_top_left;
 		@(screen_max.x, screen_max.y) => screen_top_right;
+		@(screen_max.x, screen_min.y) => screen_bot_right;
 
+		// update mouse stuff
+		GWindow.mouseLeft() => mouse_left;
+		GWindow.mouseLeftDown() => mouse_left_down;
+		GWindow.mouseLeftUp() => mouse_left_up;
+		GWindow.mouseRight() => mouse_right;
+		GWindow.mouseRightDown() => mouse_right_down;
+		GWindow.mouseRightUp() => mouse_right_up;
 	}
 	// ------------------- state stacks --------------------------
 	// note: these config stacks are cleared at the end of every frame to prevent accidental leaks
@@ -145,6 +162,7 @@ public class G2D extends GGen
 
 	fun void pushFont(string s) { font_stack << s; }
 	fun void popFont() { font_stack.popBack(); }
+
 	fun void pushFontSize(float s) { font_size_stack << s; }
 	fun void popFontSize() { font_size_stack.popBack(); }
 	fun void pushColor(vec3 c) { color_stack << c; }
@@ -180,7 +198,10 @@ public class G2D extends GGen
 		for (auto c : circles) c.antialias(bool);
 		for (auto e : ellipses) e.antialias(bool);
 		for (auto p : polygons) p.antialias(bool);
-		bool => texts.antialias;
+
+		// text looks terrible without antialiasing
+		// bool => texts.antialias;
+
 		capsules.antialias(bool);
 		this._scene_pass.msaa(bool);
 		GG.outputPass().sampler(bool ? TextureSampler.linear() : TextureSampler.nearest());
@@ -346,6 +367,18 @@ public class G2D extends GGen
 	}
 
 	// note: to stop an effect call effect.stop();
+	fun void animate(
+		vec2 pos, Texture@ t, int n_frames, int start, float secs_per_frame, float size
+	) { 
+		add(new AnimationEffect(
+			t,
+			n_frames,
+			start,
+			secs_per_frame,
+			size, pos, Color.WHITE
+		)); 
+	}
+
 	fun void explode(vec2 pos) { add(new ExplodeEffect(pos, 1, 1, Color.WHITE, 0, Math.two_pi, ExplodeEffect.Shape_Lines)); }
 	fun void explode(vec2 pos, float radius, dur d) { add(new ExplodeEffect(pos, d/second, radius, Color.WHITE, 0, Math.two_pi, ExplodeEffect.Shape_Lines)); }
 	fun void explode(vec2 pos, float radius, dur d, vec3 color, float angle, float width, int type) { 
@@ -555,6 +588,10 @@ public class G2D extends GGen
 		polygon(pos, 0, square_vertices, @(size, size), color);
 	}
 
+	fun void square(vec2 pos, float size) {
+		polygon(pos, 0, square_vertices, @(size, size), color_stack[-1]);
+	}
+
 	32 => int circle_segments;
 	vec2 circle_vertices[circle_segments];
 	for (int i; i < circle_segments; i++) {
@@ -651,6 +688,14 @@ public class G2D extends GGen
 		);
 	}
 
+	fun void boxFilled(
+		vec2 position,
+		float width,
+		float height
+	) {
+		boxFilled(position, width, height, color_stack[-1]);
+	}
+
 	fun void boxDotted(vec2 pos, float w, float h, float segment_length) {
 		.5 * w => float hw;
 		.5 * h => float hh;
@@ -687,6 +732,11 @@ public class G2D extends GGen
 		float l,
 		vec3 color
 	) { boxFilled(position, @(1, 0), l, l, color); }
+
+	fun void squareFilled(
+		vec2 position,
+		float l
+	) { boxFilled(position, @(1, 0), l, l, color_stack[-1]); }
 
 
 	fun void capsuleFilled(
@@ -729,6 +779,10 @@ public class G2D extends GGen
 		sprites[blend_stack[-1]].sprite(tex, @(pos.x, pos.y, layer_stack[-1]), @(1,1), 0, color_stack[-1], emission_stack[-1], alpha_stack[-1]);
 	}
 
+	fun void sprite(Texture tex, vec2 pos, float sca) {
+		sprites[blend_stack[-1]].sprite(tex, @(pos.x, pos.y, layer_stack[-1]), @(sca,sca), 0, color_stack[-1], emission_stack[-1], alpha_stack[-1]);
+	}
+
 	fun void sprite(Texture tex, vec2 pos, float sca, float rot) {
 		sprites[blend_stack[-1]].sprite(tex, @(pos.x, pos.y, layer_stack[-1]), @(sca,sca), rot, color_stack[-1], emission_stack[-1], alpha_stack[-1]);
 	}
@@ -752,6 +806,14 @@ public class G2D extends GGen
 		sprites[blend_stack[-1]].sprite(
 			tex, @(n_frames, 1), @(frame$float / n_frames, 0), 
 			@(pos.x, pos.y, layer_stack[-1]), sca, rot, color, emission_stack[-1], alpha_stack[-1]
+		);
+	}
+
+	// for 1d horizontal sprite sheets
+	fun void sprite(Texture tex, int n_frames, int frame, vec2 pos, float sca) {
+		sprites[blend_stack[-1]].sprite(
+			tex, @(n_frames, 1), @(frame$float / n_frames, 0), 
+			@(pos.x, pos.y, layer_stack[-1]), sca * @(1,1), 0, color_stack[-1], emission_stack[-1], alpha_stack[-1]
 		);
 	}
 
@@ -1665,6 +1727,58 @@ class ScreenFlashEffect extends Effect {
 			Color.WHITE * expImpulse(t, 9)
 		);
 		g.popBlend();
+
+		return STILL_GOING;
+	}
+}
+
+// plays an animation through
+public class AnimationEffect extends Effect {
+	int n_frames;
+	float time_per_frame_secs;
+	vec2 pos;
+	float size;
+	vec3 color;
+	Texture@ sprite;
+
+	int reverse;
+
+	// private
+	int _frame;
+	float cd;
+	vec2 _frame_sca; // for non-square sprites
+	
+	fun @construct(
+		Texture@ sprite,
+		int n_frames,
+		int start,
+		float time_per_frame_secs,
+		float size, vec2 pos, vec3 color) {
+			sprite @=> this.sprite;
+		n_frames => this.n_frames;
+		time_per_frame_secs => this.time_per_frame_secs;
+		size => this.size;
+		pos => this.pos;
+		color => this.color;
+		time_per_frame_secs => cd;
+		start => _frame;
+
+		sprite.width() $ float / n_frames => float frame_w;
+		@(frame_w / sprite.height(), 1) => _frame_sca;
+
+	}
+
+	fun int update(G2D g, float dt) {
+		dt -=> cd;
+		if (cd <= 0) {
+			time_per_frame_secs => cd;
+			if (reverse) _frame--;
+			else _frame++;
+		}
+
+		if (_frame >= n_frames || _frame < 0) return END;
+
+		g.sprite(sprite, @(n_frames, 1), @(_frame$float / n_frames, 0), pos, size * _frame_sca, 0, color);
 
 		return STILL_GOING;
 	}

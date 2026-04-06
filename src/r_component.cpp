@@ -852,6 +852,14 @@ void MaterialTextureView::init(MaterialTextureView* view)
 void R_Material::createBindGroupEntries(R_Material* mat, int group, G_Graph* graph,
                                         G_DrawCall* drawcall, GraphicsContext* gctx)
 {
+    // update gpu uniform buffer if stale
+    if (mat->_uniform_buffer_stale) {
+        mat->_uniform_buffer_stale = false;
+        wgpuQueueWriteBuffer(gctx->queue, mat->_uniform_buffer, 0,
+                             mat->_cpu_uniform_buffer_MALLOC,
+                             wgpuBufferGetSize(mat->_uniform_buffer));
+    }
+
     // create bindgroups for all bindings
 
     // super jank rn, if drawcall is NULL we assume we are adding bindings to a compute
@@ -866,10 +874,10 @@ void R_Material::createBindGroupEntries(R_Material* mat, int group, G_Graph* gra
                 const int UNIFORM_OFFSET
                   = MAX(gctx->limits.minUniformBufferOffsetAlignment,
                         sizeof(SG_MaterialUniformData));
-                drawcall ? graph->bindBuffer(drawcall, group, i, mat->uniform_buffer,
+                drawcall ? graph->bindBuffer(drawcall, group, i, mat->_uniform_buffer,
                                              UNIFORM_OFFSET * i,
                                              sizeof(SG_MaterialUniformData)) :
-                           graph->computePassBindBuffer(i, mat->uniform_buffer,
+                           graph->computePassBindBuffer(i, mat->_uniform_buffer,
                                                         UNIFORM_OFFSET * i,
                                                         sizeof(SG_MaterialUniformData));
             } break;
@@ -972,9 +980,9 @@ void R_Material::setBinding(GraphicsContext* gctx, R_Material* mat, u32 location
             size_t offset = MAX(gctx->limits.minUniformBufferOffsetAlignment,
                                 sizeof(SG_MaterialUniformData))
                             * location;
-            // ==optimize== set uniform buffer stale flag, flush the whole buffer at
-            // once before traversing the rendergraph
-            wgpuQueueWriteBuffer(gctx->queue, mat->uniform_buffer, offset, data, bytes);
+
+            mat->_uniform_buffer_stale = true;
+            memcpy(((char*)mat->_cpu_uniform_buffer_MALLOC) + offset, data, bytes);
         } break;
         case R_BIND_TEXTURE: {
             ASSERT(bytes == sizeof(R_TextureBinding));
@@ -1997,16 +2005,15 @@ R_Text* Component_CreateText(GraphicsContext* gctx, FT_Library ft,
     }
 
     // build text
-    text->text
-      = std::string((const char*)CQ_ReadCommandGetOffset(cmd->text_str_offset));
-    text->font_path
-      = std::string((const char*)CQ_ReadCommandGetOffset(cmd->font_path_str_offset));
+    text->text.set((const char*)CQ_ReadCommandGetOffset(cmd->text_str_offset));
+    text->font_path.set(
+      (const char*)CQ_ReadCommandGetOffset(cmd->font_path_str_offset));
     text->vertical_spacing = cmd->vertical_spacing;
     text->width            = cmd->width;
     text->alignment        = cmd->alignment;
     text->size             = cmd->size;
 
-    R_Font* font = Component_GetFont(gctx, ft, text->font_path.c_str());
+    R_Font* font = Component_GetFont(gctx, ft, text->font_path.str);
     if (!font) font = default_font;
     R_Font::updateText(gctx, font, text);
 
@@ -2121,6 +2128,10 @@ R_Material* Component_CreateMaterial(GraphicsContext* gctx,
         const int UNIFORM_OFFSET = MAX(gctx->limits.minUniformBufferOffsetAlignment,
                                        sizeof(SG_MaterialUniformData));
 
+        // init CPU-side batch uniform buffer
+        mat->_cpu_uniform_buffer_MALLOC
+          = calloc(UNIFORM_OFFSET, ARRAY_LENGTH(mat->bindings));
+
         // init uniform buffer
         char label[128] = {};
         snprintf(label, sizeof(label), "UniformBuffer for Material[%d:%s]", mat->id,
@@ -2129,7 +2140,7 @@ R_Material* Component_CreateMaterial(GraphicsContext* gctx,
         WGPUBufferDescriptor desc = {};
         desc.size                 = UNIFORM_OFFSET * ARRAY_LENGTH(mat->bindings);
         desc.usage                = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-        mat->uniform_buffer       = wgpuDeviceCreateBuffer(gctx->device, &desc);
+        mat->_uniform_buffer      = wgpuDeviceCreateBuffer(gctx->device, &desc);
 
         mat->pso = cmd->pso;
     }
@@ -2497,11 +2508,8 @@ R_Font* Component_GetFont(GraphicsContext* gctx, FT_Library library,
     if (font_path == NULL || strlen(font_path) == 0) return NULL;
 
     for (int i = 0; i < component_font_count; ++i) {
-        // this lookup won't work for loading fonts from memory
-        // actually it will if we give builtin fonts special names
-        if (component_fonts[i].font_path == font_path) {
+        if (strcmp(component_fonts[i].font_path.str, font_path) == 0)
             return &component_fonts[i];
-        }
     }
 
     R_Font* font = &component_fonts[component_font_count];
@@ -3066,8 +3074,8 @@ bool R_Font::init(GraphicsContext* gctx, FT_Library library, R_Font* font,
                   const char* font_path)
 {
     ASSERT(font->face == NULL);
-    *font           = {}; // init defaults
-    font->font_path = std::string(font_path);
+    *font = {}; // init defaults
+    font->font_path.set(font_path);
     ASSERT(font->worldSize > 0.0f);
 
     log_debug("Creating new R_Font with font path: %s", font_path);
@@ -3145,7 +3153,7 @@ bool R_Font::init(GraphicsContext* gctx, FT_Library library, R_Font* font,
     }
 
     R_Font_uploadBuffers(gctx, font);
-    font->font_path = std::string(font_path);
+    font->font_path.set(font_path);
     return true;
 }
 
@@ -3176,7 +3184,7 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
     Arena::clear(&line_offsets);
 
     // generate new glyps for this font
-    R_Font::prepareGlyphsForText(gctx, font, text->text.c_str());
+    R_Font::prepareGlyphsForText(gctx, font, text->text.str);
 
     // update material bindgroup
     R_Material* mat = Component_GetMaterial(text->_matID);
@@ -3196,7 +3204,7 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
     bool align_text = (text->width > 0);
     if (align_text) {
         FT_UInt previous = 0;
-        char* text_start = (char*)text->text.c_str();
+        char* text_start = (char*)text->text.str;
         char* text_it    = text_start;
 
         float line_width               = 0;
@@ -3210,8 +3218,8 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
             if (charcode == '\n') {
                 if (line_width > text->width && last_whitespace) {
                     ASSERT(R_Font_isWhiteSpace(*last_whitespace));
-                    char replaced_char = text->text[last_whitespace - text_start];
-                    text->text[last_whitespace - text_start] = '\n';
+                    char replaced_char = text->text.str[last_whitespace - text_start];
+                    text->text.str[last_whitespace - text_start] = '\n';
                     *ARENA_PUSH_TYPE(&line_offsets, float)
                       = text->width - width_at_last_whitespace;
 
@@ -3247,8 +3255,9 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
                     if (last_whitespace) {
                         ASSERT(R_Font_isWhiteSpace(*last_whitespace));
 
-                        char replaced_char = text->text[last_whitespace - text_start];
-                        text->text[last_whitespace - text_start] = '\n';
+                        char replaced_char
+                          = text->text.str[last_whitespace - text_start];
+                        text->text.str[last_whitespace - text_start] = '\n';
                         *ARENA_PUSH_TYPE(&line_offsets, float)
                           = text->width - width_at_last_whitespace;
 
@@ -3270,9 +3279,9 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
                         last_whitespace          = text_it - 1;
                         width_at_last_whitespace = line_width;
                     } else {
-                        ASSERT(
-                          R_Font_isWhiteSpace(text->text[text_it - text_start - 1]));
-                        text->text[text_it - text_start - 1] = '\n';
+                        ASSERT(R_Font_isWhiteSpace(
+                          text->text.str[text_it - text_start - 1]));
+                        text->text.str[text_it - text_start - 1] = '\n';
                         *ARENA_PUSH_TYPE(&line_offsets, float)
                           = text->width - line_width;
 
@@ -3307,8 +3316,8 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
         // final line
         if (line_width > text->width && last_whitespace) {
             ASSERT(R_Font_isWhiteSpace(*last_whitespace));
-            char replaced_char = text->text[last_whitespace - text_start];
-            text->text[last_whitespace - text_start] = '\n';
+            char replaced_char = text->text.str[last_whitespace - text_start];
+            text->text.str[last_whitespace - text_start] = '\n';
             *ARENA_PUSH_TYPE(&line_offsets, float)
               = text->width - width_at_last_whitespace;
 
@@ -3334,6 +3343,7 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
     }
 
     int line_offset_count = ARENA_LENGTH(&line_offsets, float);
+    UNUSED_VAR(line_offset_count);
     int line_offset_idx   = 0;
 
     // compute new bounding box
@@ -3356,7 +3366,7 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
         }
         float y          = 0;
         FT_UInt previous = 0;
-        char* textIt     = (char*)text->text.c_str();
+        char* textIt     = (char*)text->text.str;
         while (*textIt != '\0') {
             uint32_t charcode = R_Font_decodeCharcode(&textIt);
 
@@ -3453,7 +3463,7 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
     R_Material::setUniformBinding(gctx, mat, 5, &bb, sizeof(bb));
 
     // leq because whitespaces are skipped
-    ASSERT(ARENA_LENGTH(&indices, u32) <= text->text.length() * 6);
+    ASSERT(ARENA_LENGTH(&indices, u32) <= text->text.len * 6);
 }
 
 // build new glyphs if text has unseen characters

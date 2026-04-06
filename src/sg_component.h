@@ -38,8 +38,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include <iostream> // std::string
-
 #include <pl/pl_mpeg.h>
 
 // forward decls
@@ -803,8 +801,8 @@ enum SG_Text_AlignmentType : u32 {
 };
 
 struct SG_Text : public SG_Mesh {
-    std::string font_path   = "";
-    std::string text        = "";
+    chugl_string text;
+    chugl_string font_path;
     t_CKVEC2 control_points = { 0.5f, 0.5f };
     float vertical_spacing  = 1.0f;
     float width;
