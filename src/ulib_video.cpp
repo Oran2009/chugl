@@ -237,7 +237,7 @@ void ulib_video_query(Chuck_DL_Query* QUERY)
           "playback "
           "is NOT supported. Negative rates will be clamped to 0");
 
-        MFUN(video_get_rate, "void", "rate");
+        MFUN(video_get_rate, "float", "rate");
         DOC_FUNC(
           "Get the playback rate of the video. 1.0 is normal speed. Negative rates are "
           "not "
@@ -513,19 +513,16 @@ CK_DLL_CTOR(video_ctor_with_path)
     int frame_h = plm_get_height(plm);
 
     // create the rgb video texture
-    SG_TextureDesc desc = {};
-    desc.width          = frame_w;
-    desc.height         = frame_h;
-    desc.dimension      = WGPUTextureDimension_2D;
-    desc.format         = WGPUTextureFormat_RGBA8Unorm;
-    desc.usage          = WGPUTextureUsage_All;
-    desc.gen_mips       = false;
-
-    video_texture_rgba = SG_CreateTexture(&desc, NULL, SHRED, true);
+    SG_TextureDesc desc          = {};
+    desc.width                   = frame_w;
+    desc.height                  = frame_h;
+    desc.dimension               = WGPUTextureDimension_2D;
+    desc.format                  = WGPUTextureFormat_RGBA8Unorm;
+    desc.usage                   = WGPUTextureUsage_All;
+    desc.gen_mips                = false;
+    video->video_texture_rgba_id = SG_CreateTexture(&desc, NULL, SHRED, true)->id;
 
     // create the YCbCr video textures
-    desc.width     = NEXT_MULT16(frame_w); // Plane size rounded up to nearest 16 px
-    desc.height    = NEXT_MULT16(frame_h);
     desc.dimension = WGPUTextureDimension_2D;
     desc.format    = WGPUTextureFormat_R8Unorm;
     // TextureUsages(STORAGE_BINDING) are not allowed on a texture of type R8Unorm
@@ -540,9 +537,8 @@ CK_DLL_CTOR(video_ctor_with_path)
     video->video_texture_cb_id = SG_CreateTexture(&desc, NULL, SHRED, true)->id;
 
     // init remaining video fields
-    video->plm                   = plm;
-    video->path_OWNED            = path;
-    video->video_texture_rgba_id = video_texture_rgba->id;
+    video->plm        = plm;
+    video->path_OWNED = path;
 
     CQ_PushCommand_VideoUpdate(video);
 }
@@ -708,36 +704,20 @@ CK_DLL_MFUN(video_seek)
 // webcam
 // =================================================================================================
 
-// currently unsupported on linux.
-// logs warning if Webcam constructor is called on linux
-static void ulib_webcam_validate()
-{
-#if defined(_WIN32)
-#elif defined(__APPLE__)
-#elif defined(__EMSCRIPTEN__)
-#else /* anything else, this will need more care for non-Linux platforms */
-    log_warn("webcam is not supported on this platform");
-#endif
-}
-
 CK_DLL_CTOR(webcam_ctor)
 {
-    ulib_webcam_validate();
-    // SG_CreateWebcam(SELF, SHRED, 0, 640, 480, 60);
     // default to really high resolution (should fallback to largest supported)
     SG_CreateWebcam(SELF, SHRED, 0, 4096, 4096, 60);
 }
 
 CK_DLL_CTOR(webcam_ctor_with_device_id)
 {
-    ulib_webcam_validate();
     int device_id = GET_NEXT_INT(ARGS);
     SG_CreateWebcam(SELF, SHRED, device_id, 640, 480, 60);
 }
 
 CK_DLL_CTOR(webcam_ctor_with_device_id_and_format)
 {
-    ulib_webcam_validate();
     int device_id = GET_NEXT_INT(ARGS);
     int width     = GET_NEXT_INT(ARGS);
     int height    = GET_NEXT_INT(ARGS);

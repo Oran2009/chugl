@@ -195,6 +195,12 @@ GText.defaultFont(me.dir() + "./card_assets/ritegaki.otf");
 3 => int Suit_Spade;
 4 => int Suit_Count;
 
+FlatMaterial suit_materials[Suit_Count];
+for (int suit; suit < Suit_Count; suit++) {
+    suit_materials[suit].colorMap(suit2sprite(suit));
+}
+
+
 0 => int VictoryAnim_Left;
 1 => int VictoryAnim_Right;
 2 => int VictoryAnim_Up;
@@ -386,9 +392,40 @@ class Card {
     float anim_layer;
     vec2 deal_curr_pos;
 
+    GGen art;
+    static PlaneGeometry card_geo;
 
     fun Card(int val, int suit) {
         val => this.val; suit => this.suit;
+
+        // initialize symbols and text
+        CARD_HH * g.UP + CARD_HW * g.RIGHT => vec2 top_right;
+        CARD_HH * g.UP + CARD_HW * g.LEFT => vec2 top_left;
+        .5 * CARD_HW => float suit_size;
+
+        GText card_number --> art;
+        card_number.controlPoints(@(0, 1));
+        card_number.color(Color.BLACK);
+        card_number.pos(top_left + CARD_INNER_PAD.val() * @(1, -1));
+        card_number.size(suit_size);
+        card_number.text(val == 1 ? "A" : ("" + val));
+
+        GMesh suit_sprite(card_geo, suit_materials[suit]) --> art; 
+        top_right - (.5 * suit_size + CARD_INNER_PAD.val() + SUIT_SYMBOL_OFFSET.val()) * @(1, 1) => vec2 suit_pos;
+        suit_sprite.pos(suit_pos);
+        suit_sprite.sca(suit_size * 1.2);
+
+        // body sprite pattern
+        if (val == 1) {
+            GMesh body_sprite(card_geo, suit_materials[suit]) --> art; 
+            body_sprite.sca(CARD_HH * ACE_SYMBOL_SIZE.val());
+        } else {
+            for (auto delta : symbol_positions[val]) {
+                GMesh body_sprite(card_geo, suit_materials[suit]) --> art; 
+                body_sprite.pos(delta - @(0, .16));
+                body_sprite.sca(suit_size * 1.12);
+            }
+        }
     }
 
     fun void reset() {
@@ -421,6 +458,8 @@ class Card {
     }
 
     fun static void draw(Card c, vec2 pos, float layer) {
+        if (c.art.parent() == null) c.art --> GG.scene();
+
         // if being dealt, zeno interp towards pos
         if (room == Room_Deal || c.was_swapped) {
             // update visual position
@@ -473,38 +512,8 @@ class Card {
             }
         } g.popPolygonRadius(); g.popLayer();
 
-        // TODO fix layer/depth sorting
-        g.pushLayer(layer + .01); 
-        {
-            pos + CARD_HH * g.UP + CARD_HW * g.RIGHT => vec2 top_right;
-            pos + CARD_HH * g.UP + CARD_HW * g.LEFT => vec2 top_left;
-            .5 * CARD_HW => float suit_size;
-
-            top_left + CARD_INNER_PAD.val() * @(1, -1) => vec2 number_pos;
-            g.pushColor(Color.BLACK);
-            g.pushTextControlPoint(0, 1);
-            if (c.val == 1) g.text("A", number_pos, 1*suit_size);
-            else g.text("" + c.val, number_pos, 1*suit_size);
-            g.popTextControlPoint();
-            g.popColor();
-
-            top_right - (.5 * suit_size + CARD_INNER_PAD.val() + SUIT_SYMBOL_OFFSET.val()) * @(1, 1) => vec2 suit_pos;
-
-            // audge's art
-            g.pushColor(Color.WHITE);
-            g.sprite(suit2sprite(c.suit), suit_pos, suit_size * 1.2, 0);
-
-            if (c.val == 1) g.sprite(suit2sprite(c.suit), pos, CARD_HH * ACE_SYMBOL_SIZE.val(), 0);
-            else {
-                for (auto delta : symbol_positions[c.val]) {
-                    g.sprite(suit2sprite(c.suit), pos + delta - @(0, .16), suit_size * 1.12, 0);
-                }
-            }
-
-            g.popColor();
-
-        } 
-        g.popLayer();
+        // draw card symbols and text
+        c.art.pos(@(pos.x, pos.y, layer + .01));
     }
 
     fun int legalToPickup() {
@@ -554,17 +563,21 @@ class Stack {
         cards << c;
     }
 
-    fun int legalToAdd(Card c) {
-        (
-            cards.size() == 0
-            || 
-            (
-                Card.oppositeColors(c.suit, cards[-1].suit)
-                &&
-                cards[-1].val - 1 == c.val
-            )
-        ) => int ret;
-        return ret;
+    fun int legalToAdd(Card c[]) {
+        T.assert(c.size() > 0, "cannot add empty stack");
+        if (is_ace_stack) {
+            return c.size() == 1 && empty() && c[0].suit == this.suit;
+        } else {
+            return (
+                cards.size() == 0
+                || 
+                (
+                    Card.oppositeColors(c[0].suit, cards[-1].suit)
+                    &&
+                    cards[-1].val - 1 == c[0].val
+                )
+            );
+        }
     }
 
     // does NOT change the card's assigned stack and idx to handle if the player drops in invalid position,
@@ -669,6 +682,7 @@ int num_wins;
 
 float gametime;
 float win_time;
+-1 => float best_win_time;
 
 // options
 true => int sfx_on;
@@ -688,7 +702,7 @@ Card aces[0];
 
 Card@ hovered_card;
 Stack@ hovered_stack; // which stack the mouse is over
-Stack@ hovered_ace_stack; // which ace stack the mouse is over
+// Stack@ hovered_ace_stack; // which ace stack the mouse is over
 Card@ selected_ace; // card selected from ace area. can also be a non-ace the player is trying to put back
 
 Card@ held_cards[0];
@@ -1004,7 +1018,6 @@ fun void deal() {
     // reset held card state
     null @=> hovered_card;
     null @=> hovered_stack;
-    null @=> hovered_ace_stack;
     null @=> selected_ace;
 
     held_cards.clear();
@@ -1015,6 +1028,20 @@ fun void deal() {
     if (deal_gen == curr_gen) {
         Room_Play => room;
     }
+}
+
+fun void selectAce(Card@ card) {
+    // deselect current ace
+    if (selected_ace != null) {
+        false => selected_ace.was_swapped;
+        false => selected_ace.selected;
+    }
+
+    T.assert(card.val == 1, "cannot select non-ace as ace");
+    card @=> selected_ace;
+    true => selected_ace.selected;
+    false => selected_ace.was_swapped;
+    sfx.pickup(selected_ace, selected_ace.pos());
 }
 
 // returns true if all stacks are sorted
@@ -1167,7 +1194,21 @@ fun int button(string text, vec2 center, vec3 color) {
     g.text(text, center, .5 * CARD_HW);
     g.popColor();
 
+    // g.box(center - @(1.1, .3), center);
+
     return inside && g.mouseLeftDown();
+}
+
+fun string timeToString(float dur_secs) {
+    (dur_secs / 60) $ int => int minutes;
+    (dur_secs - (minutes * 60)) $ int => int seconds;
+
+    string s;
+    (minutes + ":") +=> s;
+    if (seconds < 10)  "0" +=> s;
+    seconds +=> s;
+
+    return s;
 }
 
 
@@ -1175,7 +1216,7 @@ fun int button(string text, vec2 center, vec3 color) {
 GG.nextFrame() => now;
 
 
-false => int do_ui;
+true => int do_ui;
 while (1) {
     GG.nextFrame() => now;
     g.mousePos() => vec2 mouse_pos;
@@ -1210,50 +1251,63 @@ while (1) {
         }
     }
 
-    { // game ui
+    g.pushFontSize(.5 * CARD_HW); { // game ui
         @(
             (stacks.size() - 1) * (STACK_SPACING.val() * .5 + CARD_HW) + CARD_HW,
             ACE_STACK_START_Y.val() + CARD_HH
         ) => vec2 center;
+
+
         g.pushTextControlPoint(1, 1);
 
-        // check isect
-        if (M.inside(mouse_pos, center - @(1.1, .3), center)) {
-            g.pushColor(ace_colors[0].val());
-            if (g.mouseLeftDown()) {
-                spork ~ deal();
-            }
-        } else {
+        g.line(@(g.screen_min.x, center.y), @(g.screen_max.x, center.y));
+
+        // current time
+        {
             g.pushColor(.8 * Color.WHITE);
+            g.text(timeToString(gametime), center + @(0, 0.25), .2);
+
+            if (best_win_time > 0 || true) {
+                @(
+                    -6 * (STACK_SPACING.val() * .5 + CARD_HW) - CARD_HW,
+                    g.screen_min.y + .2
+                    // ACE_STACK_START_Y.val() + CARD_HH
+                ) => vec2 c;
+
+                g.pushTextControlPoint(0, 1);
+                g.text("best: " + timeToString(best_win_time), c + @(0, 0.25), .2);
+                g.popTextControlPoint();
+            }
+
+            g.popColor();
         }
-        g.text("reset", center, .5 * CARD_HW);
-        g.popColor();
+
+
+        .425 * CARD_HH => float dy;
+        // .25 * dy -=> center.y;
+
+        if (button("reset", center, ace_colors[0].val())) {
+            spork ~ deal();
+        }
+
         // bbox
         // g.box(center - @(1.1, .3), center);
 
-        .4 * CARD_HH -=> center.y;
+        .75 * dy -=> center.y;
 
-        if (M.inside(mouse_pos, center - @(1.1, .3), center)) {
-            g.pushColor(ace_colors[1].val());
-            if (!bypass_rule_button && g.mouseLeftDown()) {
-                sfx.paper();
-                // sfx.swoosh();
-                true => display_rules;
-            }
-        } else {
-            g.pushColor(.8 * Color.WHITE);
+        if (button("rules", center, ace_colors[1].val()) && !bypass_rule_button) {
+            sfx.paper();
+            true => display_rules;
         }
-        g.text("rules", center, .5 * CARD_HW);
-        g.popColor();
 
-        .5 * CARD_HH -=> center.y;
+        dy -=> center.y;
 
         if (button("sfx:" + (sfx_on ? "on" : "off"), center, ace_colors[2].val())) {
             !sfx_on => sfx_on;
             sfx.enableSfx(sfx_on);
         }
 
-        .5 * CARD_HH -=> center.y;
+        dy -=> center.y;
 
         if (button("music:" + (music_on ? "on" : "off"), center, ace_colors[3].val())) {
             !music_on => music_on;
@@ -1261,10 +1315,16 @@ while (1) {
             sfx.reject();
         }
 
-        .5 * CARD_HH -=> center.y;
+        dy -=> center.y;
         g.pushColor(.8 * Color.WHITE);
-        g.text("W:" + num_wins, center, .5 * CARD_HW);
+        // g.text("best " + timeToString(best_win_time) + " W:" + num_wins, center);
+        g.text("W:" + num_wins, center);
         g.popColor();
+
+
+        dy -=> center.y;
+
+        g.line(@(g.screen_min.x, center.y), @(g.screen_max.x, center.y));
 
         g.popTextControlPoint();
     }
@@ -1291,6 +1351,7 @@ while (1) {
                     ) {
                         true => card.hovered;
                         card @=> hovered_card;
+                        s @=> hovered_stack;
                     } else {
                         false => card.hovered;
                     }
@@ -1310,6 +1371,7 @@ while (1) {
                     if (M.aabbIsect(held_card_pos, @(CARD_HW, CARD_HH), s.cards[-1].pos(), @(CARD_HW, CARD_HH))) {
                         true => s.cards[-1].hovered;
                         s.cards[-1] @=> hovered_card;
+                        s @=> hovered_stack;
                         break;
                     } 
                 }
@@ -1319,11 +1381,10 @@ while (1) {
             if (hovered_card == null) {
                 for (auto s : ace_stack) {
                     s.hovered(mouse_pos) => int hovered;
+                    if (hovered) s @=> hovered_stack;
                     if (s.cards.size()) {
                         hovered => s.cards[-1].hovered;
                         if (hovered) s.cards[-1] @=> hovered_card;
-                    } else {
-                        if (hovered) s @=> hovered_ace_stack;
                     }
                 }
             }
@@ -1331,6 +1392,8 @@ while (1) {
 
         if (g.mouseLeftDown()) {
             if (selected_ace != null && selected_ace.val == 1) {
+                selected_ace @=> Card@ original_ace;
+
                 // ace already selected, attempt to perform a swap
                 if (hovered_card != null) {
                     if (
@@ -1352,6 +1415,9 @@ while (1) {
 
                         // play sound
                         sfx.swap(selected_ace, hovered_card);
+                    } 
+                    else if (hovered_card.val == 1 && hovered_card != selected_ace) {
+                        selectAce(hovered_card);
                     } else {
                         sfx.reject(selected_ace);
                     }
@@ -1359,14 +1425,18 @@ while (1) {
                     sfx.reject(selected_ace);
                 }
 
-                false => selected_ace.selected;
-                null @=> selected_ace;
+                // deselect the ace
+                if (selected_ace == original_ace) {
+                    false => selected_ace.selected;
+                    null @=> selected_ace;
+                }
             }
             else if (selected_ace == null && hovered_card != null && hovered_card.stack.is_ace_stack && hovered_card.val == 1) {
-                hovered_card @=> selected_ace;
-                true => selected_ace.selected;
-                false => selected_ace.was_swapped;
-                sfx.pickup(selected_ace, selected_ace.pos());
+                selectAce(hovered_card);
+                // hovered_card @=> selected_ace;
+                // true => selected_ace.selected;
+                // false => selected_ace.was_swapped;
+                // sfx.pickup(selected_ace, selected_ace.pos());
             }
             else if (selected_ace == null && hovered_card != null && hovered_card.legalToPickup()) {
                 hovered_card.stack @=> Stack stack;
@@ -1397,15 +1467,12 @@ while (1) {
         // drop cards
         if (g.mouseLeftUp() && held_cards.size()) {
             held_cards[0].stack @=> Stack original_stack;
-            Stack @stack;
+            original_stack @=> Stack@ stack;
 
             // no stack hovered OR illegal move, put back in original
-            if (hovered_card != null && hovered_card.stack.legalToAdd(held_cards[0])) hovered_card.stack @=> stack;
-            else if (hovered_stack != null && hovered_stack.legalToAdd(held_cards[0])) hovered_stack @=> stack;
-            else if (held_cards.size() == 1 && hovered_ace_stack != null && hovered_ace_stack.empty() && held_cards[0].suit == hovered_ace_stack.suit) {
-                hovered_ace_stack @=> stack;
+            if (hovered_stack != null && hovered_stack.legalToAdd(held_cards)) {
+                 hovered_stack @=> stack;
             }
-            else held_cards[0].stack @=> stack;
 
             if (stack == original_stack) {
                 // sfx.swoosh();
@@ -1487,9 +1554,7 @@ while (1) {
 
             // draw
             Color.WHITE => vec3 color;
-            if (hovered_ace_stack == stack) {
-                Color.ORANGE => color;
-            }
+            if (hovered_stack == stack) Color.ORANGE => color;
             stack.draw(color, mouse_pos);
         }
     }
@@ -1503,6 +1568,8 @@ while (1) {
     if (room == Room_Play && winstate() || (do_ui && UI.button("win"))) {
         Room_Win => room;
         gametime => win_time;
+
+        if (best_win_time < 0 || win_time < best_win_time) win_time => best_win_time;
 
         ++num_wins;
         saveWinCount();
@@ -1529,6 +1596,5 @@ while (1) {
     { // cleanup
         null @=> hovered_card;
         null @=> hovered_stack;
-        null @=> hovered_ace_stack;
     }
 }

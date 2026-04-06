@@ -169,10 +169,17 @@ static void autoUpdateScenegraph(Arena* arena, SG_Scene* scene, Chuck_VM* VM,
         API->vm->invoke_mfun_immediate_mode(ggen, _ggen_update_vt_offset, VM,
                                             origin_shred, &theArg, 1);
 
+        // get the xform from id again because invoking GGen.update() may
+        // have created enough GGens to cause an array reallocation, invalidating
+        // the xform pointer
+        xform = SG_GetTransform(sg_id);
+
         // add children to stack
-        size_t numChildren  = SG_Transform::numChildren(xform);
-        SG_ID* children_ptr = ARENA_PUSH_COUNT(arena, SG_ID, numChildren);
-        memcpy(children_ptr, xform->childrenIDs.base, sizeof(SG_ID) * numChildren);
+        if (xform) {
+            size_t numChildren  = SG_Transform::numChildren(xform);
+            SG_ID* children_ptr = ARENA_PUSH_COUNT(arena, SG_ID, numChildren);
+            memcpy(children_ptr, xform->childrenIDs.base, sizeof(SG_ID) * numChildren);
+        }
     }
 }
 
@@ -267,8 +274,7 @@ static void FlushGraphicsToAudioCQ()
             case SG_COMMAND_G2A_TEXTURE_SAVE: {
                 SG_Command_G2A_TextureSave* cmd = (SG_Command_G2A_TextureSave*)command;
                 OBJ_MEMBER_INT((Chuck_Object*)cmd->texture_save_event,
-                               texture_save_event_status_offset)
-                  = cmd->status;
+                               texture_save_event_status_offset) = cmd->status;
                 Event_Broadcast(cmd->texture_save_event);
                 API->object->release((Chuck_Object*)cmd->texture_save_event);
             } break;
@@ -1341,6 +1347,9 @@ CK_DLL_QUERY(ChuGL)
     }
 
     chugl_init_default_setup_impl();
+
+    // init chuck events (nextFrame, windowResize etc)
+    Event_Init(g_chuglAPI, g_chuglVM);
 
     // wasn't that a breeze?
     return true;

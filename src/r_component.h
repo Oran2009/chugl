@@ -490,9 +490,13 @@ struct R_Material : public R_Component {
     SG_MaterialPipelineState pso;
     // bindgroup state (uniforms, storage buffers, textures, samplers)
     R_Binding bindings[CHUGL_MATERIAL_MAX_BINDINGS];
-    WGPUBuffer uniform_buffer;
+
+    void* _cpu_uniform_buffer_MALLOC; // used for batch writing
+    WGPUBuffer _uniform_buffer;
+    bool _uniform_buffer_stale; // used to batch write all uniform data in
+                                // R_Material::createBindGroupEntries
     // ==optimize== after implementing wgsl reflection layout generator, can cache
-    // bindgroup on material?
+    // bindgroup on material? can then get rid of cpu-side uniform buffer per material
 
     // bind group fns --------------------------------------------
 
@@ -787,8 +791,8 @@ struct BoundingBox {
 };
 
 struct R_Text : public R_Transform {
-    std::string text;
-    std::string font_path;
+    chugl_string text;
+    chugl_string font_path;
     glm::vec2 control_points;
     float vertical_spacing;
 
@@ -798,7 +802,7 @@ struct R_Text : public R_Transform {
 };
 
 struct R_Font {
-    std::string font_path;
+    chugl_string font_path;
     FT_Face face; // TODO multiplex faces across R_Font. multiple R_Font with same
                   // font but different text can share the same face
 
@@ -1304,6 +1308,7 @@ struct G_Cache {
                   } };
 
             const void* replaced = hashmap_set(compute_pipeline_map, &item);
+            UNUSED_VAR(replaced);
             ASSERT(!replaced);
 
             result = (G_CacheComputePipeline*)hashmap_get(compute_pipeline_map, &item);
@@ -1381,6 +1386,7 @@ struct G_Cache {
 
             bool is_render_pipeline = (shader->vertex_shader_module != NULL);
             // bool is_compute_pipeline = (shader->compute_shader_module != NULL);
+            UNUSED_VAR(is_render_pipeline);
             ASSERT(is_render_pipeline);
 
             // build pipeline desc
