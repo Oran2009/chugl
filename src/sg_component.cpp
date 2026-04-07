@@ -30,6 +30,8 @@
 #include "geometry.h"
 #include "sg_command.h"
 
+#include <iostream>
+
 #include "core/log.h"
 #include "ulib_helper.h"
 
