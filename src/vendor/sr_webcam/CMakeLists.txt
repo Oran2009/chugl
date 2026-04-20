@@ -11,6 +11,8 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin") # aka macOS
     set(SR_WEBCAM_SOURCES ${SR_WEBCAM_SOURCES} src/sr_webcam_mac.m)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(SR_WEBCAM_SOURCES ${SR_WEBCAM_SOURCES} src/sr_webcam_lin.c)
+elseif(EMSCRIPTEN)
+    set(SR_WEBCAM_SOURCES ${SR_WEBCAM_SOURCES} src/sr_webcam_emscripten.c)
 else()
     message(FATAL_ERROR "sr_webcam library not supported on this platform")
 endif()
