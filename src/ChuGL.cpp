@@ -411,6 +411,15 @@ static void chugl_GraphicsShredPerformNextFrameUpdate(Chuck_VM_Shred* SHRED)
         // Handle commands from graphics thread
         FlushGraphicsToAudioCQ();
 
+#ifdef __EMSCRIPTEN__
+        // zero out mouse deltas
+        // spinlock::lock(&chugl_mouse.mouse_lock);
+        em_mouse_movement_x = 0;
+        em_mouse_movement_y = 0;
+        // spinlock::unlock(&chugl_mouse.mouse_lock);
+#endif
+
+
         // Handle async file dialog results
         // disabling for now
         // processAsyncFileDialogResults();
