@@ -38,6 +38,7 @@
 #include "core/spinlock.h"
 
 #ifdef __EMSCRIPTEN__
+#include <emscripten/html5.h>
 #include <GLFW/glfw3.h>
 #else
 #include <glfw/include/GLFW/glfw3.h>
@@ -332,9 +333,25 @@ t_CKVEC2 CHUGL_Mouse_Position()
     return pos;
 }
 
+
+static float em_mouse_movement_x;
+static float em_mouse_movement_y;
 t_CKVEC2 CHUGL_Mouse_Delta()
 {
     t_CKVEC2 delta = {};
+
+// azaday: if pointer lock is active, get mouse deltas directly from browser 
+#ifdef __EMSCRIPTEN__
+    EmscriptenPointerlockChangeEvent e = {};
+    if (emscripten_get_pointerlock_status(&e) == EMSCRIPTEN_RESULT_SUCCESS) {
+        if (e.isActive) {
+            delta.x = em_mouse_movement_x;
+            delta.y = em_mouse_movement_y;
+            return delta;
+        }
+    }
+#endif
+
     spinlock::lock(&chugl_mouse.mouse_lock);
     delta.x = chugl_mouse.dx;
     delta.y = chugl_mouse.dy;

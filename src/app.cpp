@@ -504,6 +504,15 @@ struct App {
                               //   https://github.com/glfw/glfw/issues/1968)
         }
 
+        { // set emscripten callbacks
+            emscripten_set_mousemove_callback(
+                EMSCRIPTEN_EVENT_TARGET_DOCUMENT,
+                nullptr,
+                EM_TRUE,
+                _emMouseMoveCallback);
+
+        }
+
         // Setup ImGui Platform/Renderer backends
         {
             ImGui_ImplGlfw_InitForOther(app->window, true);
@@ -1456,6 +1465,19 @@ struct App {
         app->mouse_y = ypos;
 
         CHUGL_Mouse_Position(xpos, ypos);
+    }
+
+    static EM_BOOL _emMouseMoveCallback(
+        int eventType,
+        const EmscriptenMouseEvent* e,
+        void* userData)
+    {
+        if (eventType != EMSCRIPTEN_EVENT_MOUSEMOVE) return EM_TRUE;
+
+        em_mouse_movement_x += (float)e->movementX;
+        em_mouse_movement_y += (float)e->movementY;
+
+        return EM_TRUE;
     }
 };
 
