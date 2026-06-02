@@ -36,9 +36,11 @@
 #include <glfw3webgpu/glfw3webgpu.h>
 #include <webgpu/webgpu.h>
 
+#define WGPU_STR(s) (WGPUStringView{ (s), WGPU_STRLEN })
+
 #define WGPU_REFERENCE_RESOURCE(Type, Name)                                            \
     if (Name) {                                                                        \
-        wgpu##Type##Reference(Name);                                                   \
+        wgpu##Type##AddRef(Name);                                                      \
     }
 
 #define WGPU_RELEASE_RESOURCE(Type, Name)                                              \
@@ -181,7 +183,7 @@ struct GPU_Buffer {
         return gpu_buffer.buf ? wgpuBufferGetSize(gpu_buffer.buf) : 0;
     }
 
-    static WGPUBufferUsageFlags usage(GPU_Buffer gpu_buffer)
+    static WGPUBufferUsage usage(GPU_Buffer gpu_buffer)
     {
         return gpu_buffer.buf ? wgpuBufferGetUsage(gpu_buffer.buf) : 0;
     }
@@ -189,11 +191,11 @@ struct GPU_Buffer {
     // resizes buffer, does NOT copy old data
     // returns true if buffer was recreated
     static bool resizeNoCopy(GraphicsContext* gctx, GPU_Buffer* gpu_buffer,
-                             u64 new_size, WGPUBufferUsageFlags usage_flags);
+                             u64 new_size, WGPUBufferUsage usage_flags);
 
     // optional, initialize size
     static void init(GraphicsContext* gctx, GPU_Buffer* gpu_buffer,
-                     WGPUBufferUsageFlags usage_flags, u64 new_capacity)
+                     WGPUBufferUsage usage_flags, u64 new_capacity)
     {
         ASSERT(!gpu_buffer->buf);
 
@@ -209,13 +211,13 @@ struct GPU_Buffer {
 
     // returns true if buffer was recreated (because of capacity or usage flags)
     static bool write(GraphicsContext* gctx, GPU_Buffer* gpu_buffer,
-                      WGPUBufferUsageFlags usage_flags, u64 offset, const void* data,
+                      WGPUBufferUsage usage_flags, u64 offset, const void* data,
                       u64 size)
     {
         bool recreated = false;
 
         u64 capacity               = 0;
-        WGPUBufferUsageFlags usage = 0;
+        WGPUBufferUsage usage = 0;
         if (gpu_buffer->buf) {
             usage    = wgpuBufferGetUsage(gpu_buffer->buf);
             capacity = wgpuBufferGetSize(gpu_buffer->buf);
@@ -257,7 +259,7 @@ struct GPU_Buffer {
 
     // returns true if buffer was recreated (because of capacity or usage flags)
     static bool write(GraphicsContext* gctx, GPU_Buffer* gpu_buffer,
-                      WGPUBufferUsageFlags usage_flags, const void* data, u64 size)
+                      WGPUBufferUsage usage_flags, const void* data, u64 size)
     {
         return write(gctx, gpu_buffer, usage_flags, 0, data, size);
     }

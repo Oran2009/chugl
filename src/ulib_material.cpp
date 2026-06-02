@@ -306,7 +306,7 @@ void ulib_material_query(Chuck_DL_Query* QUERY)
     BEGIN_CLASS("VertexFormat", "Object");
     DOC_CLASS("Vertex format enum. Used to describe vertex data layout in ShaderDesc.");
 
-    static t_CKINT format_undefined = WGPUVertexFormat_Undefined;
+    static t_CKINT format_undefined = (WGPUVertexFormat)0;
     static t_CKINT format_float     = WGPUVertexFormat_Float32;
     static t_CKINT format_float2    = WGPUVertexFormat_Float32x2;
     static t_CKINT format_float3    = WGPUVertexFormat_Float32x3;
@@ -1405,7 +1405,7 @@ CK_DLL_CTOR(shader_ctor)
     for (int i = 0; i < vertex_layout_len; i++) {
         WGPUVertexFormat format = vertex_layout[i];
 
-        bool format_is_undefined   = (format == WGPUVertexFormat_Undefined);
+        bool format_is_undefined   = (format == (WGPUVertexFormat)0);
         bool format_is_valid_float = (format >= WGPUVertexFormat_Float32
                                       && format <= WGPUVertexFormat_Float32x4);
         bool format_is_valid_int

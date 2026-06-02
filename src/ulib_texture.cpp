@@ -73,7 +73,7 @@ static t_CKUINT texture_write_desc_height_offset = 0;
 static t_CKUINT texture_write_desc_depth_offset  = 0;
 
 // TextureLocation -----------------------------------------------------------------
-// wrapper around WGPUImageCopyTexture, describes a region of a texture to copy to/from
+// wrapper around WGPUTexelCopyTextureInfo, describes a region of a texture to copy to/from
 // NOT storying the actual texture in here so we don't need to worry about refcounting
 
 CK_DLL_CTOR(texture_location_ctor);

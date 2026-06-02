@@ -291,7 +291,7 @@ struct R_Texture : public R_Component {
         if (needs_resize) {
             // init descriptor
             WGPUTextureDescriptor wgpu_texture_desc = {};
-            wgpu_texture_desc.label                 = r_tex->name;
+            wgpu_texture_desc.label                 = WGPU_STR(r_tex->name);
             wgpu_texture_desc.usage                 = r_tex->desc.usage;
             wgpu_texture_desc.dimension             = r_tex->desc.dimension;
             wgpu_texture_desc.size                  = { width, height, depth };
@@ -327,7 +327,7 @@ struct R_Texture : public R_Component {
 
         // write gpu_texture data
         {
-            WGPUImageCopyTexture destination = {};
+            WGPUTexelCopyTextureInfo destination = {};
             destination.texture              = texture->gpu_texture;
             destination.mipLevel             = write_desc->mip;
             destination.origin               = {
@@ -338,7 +338,7 @@ struct R_Texture : public R_Component {
             destination.aspect = WGPUTextureAspect_All; // only relevant for
                                                         // depth/Stencil textures
 
-            WGPUTextureDataLayout source = {};
+            WGPUTexelCopyBufferLayout source = {};
             source.offset = 0; // where to start reading from the cpu buffer
             source.bytesPerRow
               = write_desc->width * G_bytesPerTexel(texture->desc.format);
@@ -374,7 +374,7 @@ struct R_Texture : public R_Component {
         snprintf(label, sizeof(label) - 1, "Mapped Buffer for Texture[%d] %s", tex->id,
                  tex->name);
         WGPUBufferDescriptor bufferDesc = {};
-        bufferDesc.label                = label;
+        bufferDesc.label                = WGPU_STR(label);
         bufferDesc.usage         = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
         bufferDesc.size          = NEXT_MULT4(R_Texture::sizeBytes(tex));
         WGPUBuffer mapped_buffer = wgpuDeviceCreateBuffer(gctx->device, &bufferDesc);
@@ -384,14 +384,14 @@ struct R_Texture : public R_Component {
               = wgpuDeviceCreateCommandEncoder(gctx->device, NULL);
 
             // currently only support copying entire texture at mip 0
-            WGPUImageCopyTexture copy_location = {};
+            WGPUTexelCopyTextureInfo copy_location = {};
             copy_location.texture              = tex->gpu_texture;
 
             // TODO share command encoder across entire CQ flush
 
             // TODO allow specifying a certain region
             // for now just copying the entire texture
-            WGPUImageCopyBuffer copy_buffer = {};
+            WGPUTexelCopyBufferInfo copy_buffer = {};
             copy_buffer.buffer              = mapped_buffer;
             copy_buffer.layout.bytesPerRow
               = tex->desc.width * G_bytesPerTexel(tex->desc.format);
@@ -702,7 +702,7 @@ struct R_Pass : public R_Component {
 
         // Create the texture
         WGPUTextureDescriptor texture_desc = {};
-        texture_desc.label                 = label;
+        texture_desc.label                 = WGPU_STR(label);
         texture_desc.size                  = { width, height, 1 };
         texture_desc.mipLevelCount         = 1;
         texture_desc.sampleCount           = samps;
@@ -730,7 +730,7 @@ struct R_Pass : public R_Component {
                      pass->sg_pass.name);
 
             // Create the texture
-            texture_desc.label  = label;
+            texture_desc.label  = WGPU_STR(label);
             texture_desc.format = format;
 
             WGPUTexture new_msaa_texture
@@ -1293,9 +1293,9 @@ struct G_Cache {
             log_trace("Cache miss [ComputePipeline], creating new from %p", module);
 
             WGPUComputePipelineDescriptor desc = {};
-            desc.label                         = label;
+            desc.label                         = WGPU_STR(label);
             desc.compute.module                = module;
-            desc.compute.entryPoint            = CHUGL_COMPUTE_ENTRY_POINT;
+            desc.compute.entryPoint            = WGPU_STR(CHUGL_COMPUTE_ENTRY_POINT);
 
             WGPUComputePipeline pipeline
               = wgpuDeviceCreateComputePipeline(device, &desc);
@@ -1407,7 +1407,7 @@ struct G_Cache {
             pipeline_desc.vertex.bufferCount = vertex_layout.attribute_count;
             pipeline_desc.vertex.buffers     = vertex_layout.layouts;
             pipeline_desc.vertex.module      = shader->vertex_shader_module;
-            pipeline_desc.vertex.entryPoint  = VS_ENTRY_POINT;
+            pipeline_desc.vertex.entryPoint  = { VS_ENTRY_POINT, WGPU_STRLEN };
 
             // TODO what happens if fragment shader is not defined?
             // for backwards compat, we always enable alpha blending, even if pipeline
@@ -1429,7 +1429,7 @@ struct G_Cache {
                 colorTargetState.writeMask = WGPUColorWriteMask_All;
 
                 fragmentState.module      = shader->fragment_shader_module;
-                fragmentState.entryPoint  = FS_ENTRY_POINT;
+                fragmentState.entryPoint  = { FS_ENTRY_POINT, WGPU_STRLEN };
                 fragmentState.targetCount = 1; // fix 1 color target for now
                 fragmentState.targets     = &colorTargetState;
 
@@ -1463,7 +1463,7 @@ struct G_Cache {
             char pipeline_label[64] = {};
             snprintf(pipeline_label, sizeof(pipeline_label),
                      "RenderPipeline: Shader[%d] %s", shader->id, shader->name);
-            pipeline_desc.label = pipeline_label;
+            pipeline_desc.label = WGPU_STR(pipeline_label);
 
             WGPURenderPipeline pipeline
               = wgpuDeviceCreateRenderPipeline(device, &pipeline_desc);
@@ -1497,7 +1497,7 @@ struct G_Cache {
             WGPU_REFERENCE_RESOURCE(Texture, texture);
 
             WGPUTextureViewDescriptor view_desc = {};
-            // view_desc.label                     = mip_label; // TODO
+            // view_desc.label                     = WGPU_STR(mip_label); // TODO
             view_desc.format          = wgpuTextureGetFormat(texture);
             view_desc.dimension       = desc.view_dimension;
             view_desc.baseMipLevel    = desc.base_mip_level;
@@ -1630,7 +1630,7 @@ struct G_Cache {
             static char bg_label[64] = {};
             snprintf(bg_label, sizeof(bg_label), "%s @group(%d)", label, group);
             WGPUBindGroupDescriptor desc = {};
-            desc.label                   = bg_label;
+            desc.label                   = WGPU_STR(bg_label);
             desc.layout                  = layout;
             WGPU_REFERENCE_RESOURCE(BindGroupLayout, layout);
             desc.entryCount = bg_entry_count;
@@ -2410,7 +2410,7 @@ struct G_Graph {
                     // log_trace("Beginning RenderPass: %s", pass->name);
                     // create pass desc
                     WGPURenderPassDescriptor render_pass_desc = {};
-                    render_pass_desc.label                    = pass->name;
+                    render_pass_desc.label                    = WGPU_STR(pass->name);
                     WGPURenderPassColorAttachment ca          = {};
                     WGPURenderPassDepthStencilAttachment ds   = {};
                     WGPUTextureFormat color_format = WGPUTextureFormat_Undefined;
@@ -2508,7 +2508,7 @@ struct G_Graph {
                     G_CacheComputePipeline cp
                       = cache.computePipeline(pass->cp.module, device, NULL);
                     WGPUComputePassDescriptor cp_desc = {};
-                    cp_desc.label                     = pass->name;
+                    cp_desc.label                     = WGPU_STR(pass->name);
                     WGPUComputePassEncoder compute_pass
                       = wgpuCommandEncoderBeginComputePass(command_encoder, NULL);
                     wgpuComputePassEncoderSetPipeline(compute_pass, cp.val.pipeline);

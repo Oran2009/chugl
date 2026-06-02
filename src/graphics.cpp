@@ -109,13 +109,13 @@ static WGPUAdapter request_adapter(WGPUInstance instance,
     // On Emscripten, adapter was pre-created in JS before main() started.
     // ASYNCIFY is incompatible with MAIN_MODULE (forces DYNCALLS=1), so
     // the host pre-creates WebGPU objects and stores them on Module.
-    WGPUAdapter preAdapter = (WGPUAdapter)(uintptr_t)EM_ASM_INT({
+    WGPUAdapter preAdapter = static_cast<WGPUAdapter>(EM_ASM_PTR({
         var adapter = Module._preAdapter;
         if (!adapter) return 0;
-        var handle = WebGPU.mgrAdapter.create(adapter);
+        var handle = WebGPU.importJsAdapter(adapter);
         delete Module._preAdapter;
         return handle;
-    });
+    }));
     return preAdapter;
 #else
     wgpuInstanceRequestAdapter(instance /* equivalent of navigator.gpu */, options,
@@ -159,14 +159,13 @@ static WGPUDevice request_device(WGPUAdapter adapter,
 
 #ifdef __EMSCRIPTEN__
     // On Emscripten, device was pre-created in JS before main() started.
-    WGPUDevice preDevice = (WGPUDevice)(uintptr_t)EM_ASM_INT({
+    WGPUDevice preDevice = static_cast<WGPUDevice>(EM_ASM_PTR({
         var device = Module._preDevice;
         if (!device) return 0;
-        var queueId = WebGPU.mgrQueue.create(device.queue);
-        var handle = WebGPU.mgrDevice.create(device, { queueId: queueId });
+        var handle = WebGPU.importJsDevice(device);
         delete Module._preDevice;
         return handle;
-    });
+    }));
     return preDevice;
 #else
     wgpuAdapterRequestDevice(adapter, descriptor, onDeviceRequestEnded,
@@ -177,12 +176,12 @@ static WGPUDevice request_device(WGPUAdapter adapter,
 #endif
 }
 
-static void on_device_error(WGPUErrorType type, char const* message,
-                            void* /* pUserData */)
+static void on_device_error(WGPUDevice const*, WGPUErrorType type,
+                            WGPUStringView message, void*, void*)
 {
-    log_error("Uncaptured device error: type %d (%s)", type, message);
-    exit(EXIT_FAILURE); // intentionally crash here, even in release mode, so we can see
-                        // shader compilation errors
+    log_error("Uncaptured device error: type %d (%.*s)", type, (int)message.length,
+              message.data);
+    exit(EXIT_FAILURE);
 };
 
 #ifdef WGPU_OLD_VERSION
@@ -309,12 +308,12 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
     log_trace("adapter created");
 
     { // log adapter info
-        WGPUAdapterInfo adapter_info = {};
+        WGPUAdapterInfo adapter_info = WGPU_ADAPTER_INFO_INIT;
         wgpuAdapterGetInfo(adapter, &adapter_info);
-        log_info("Adapter vendor: %s", adapter_info.vendor);
-        log_info("Adapter architecture: %s", adapter_info.architecture);
-        log_info("Adapter device: %s", adapter_info.device);
-        log_info("Adapter description: %s", adapter_info.description);
+        log_info("Adapter vendor: %.*s", (int)adapter_info.vendor.length, adapter_info.vendor.data);
+        log_info("Adapter architecture: %.*s", (int)adapter_info.architecture.length, adapter_info.architecture.data);
+        log_info("Adapter device: %.*s", (int)adapter_info.device.length, adapter_info.device.data);
+        log_info("Adapter description: %.*s", (int)adapter_info.description.length, adapter_info.description.data);
         log_info("Adapter backend type: %s",
                  GraphicsContext_BackendTypeToString(adapter_info.backendType));
         log_info("Adapter type: %s",
@@ -323,73 +322,54 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
         log_info("Adapter device ID: %d", adapter_info.deviceID);
     }
 
-    // set required limits to max supported
+    // Query adapter limits and request them as device limits
 #ifdef WEBGPU_BACKEND_WGPU
     WGPURequiredLimits requiredLimits = {};
     WGPUSupportedLimits supportedLimits = {};
     bool success = wgpuAdapterGetLimits(adapter, &supportedLimits);
     UNUSED_VAR(success);
     ASSERT(success);
-    // copy supported limits into context
     context->limits = supportedLimits.limits;
-    logWGPULimits(&context->limits);
-
     requiredLimits.limits = context->limits;
+#else
+    wgpuAdapterGetLimits(adapter, &context->limits);
+#endif
+    logWGPULimits(&context->limits);
 
     // clang-format off
     WGPUFeatureName requiredFeatures[] = {
+#ifdef WEBGPU_BACKEND_WGPU
         (WGPUFeatureName)WGPUNativeFeature_VertexWritableStorage,
-        // (WGPUFeatureName) WGPUNativeFeature_TextureAdapterSpecificFormatFeatures,  // allows passing 32-bit float textures to texture_2d<f32> in shaders
-
-        // enabling this feature still doesn't work
-        WGPUFeatureName_Float32Filterable // needed to sample 32-bit float textures in shaders
+#endif
+        WGPUFeatureName_Float32Filterable
     };
     // clang-format on
     const u32 requiredFeaturesCount = ARRAY_LENGTH(requiredFeatures);
-    log_trace("required features: %d", ARRAY_LENGTH(requiredFeatures));
-#else
-    // On Emscripten, don't call wgpuAdapterGetLimits — the Emscripten SDK's
-    // WGPUSupportedLimits struct contains deprecated fields (e.g.
-    // maxInterStageShaderComponents) that Chrome no longer provides, causing
-    // the JS shim to write undefined into the integer heap.
-    // Set only the limits we actually use to safe WebGPU spec minimums.
-    context->limits                                = {};
-    context->limits.maxTextureArrayLayers          = 256;
-    context->limits.minUniformBufferOffsetAlignment = 256;
-    context->limits.minStorageBufferOffsetAlignment = 256;
-
-    const u32 requiredFeaturesCount   = 0;
-    WGPUFeatureName* requiredFeatures = NULL;
-#endif
+    log_trace("required features: %d", requiredFeaturesCount);
 
     // see your machine's supported features here: https://webgpureport.org/
-    WGPUDeviceDescriptor deviceDescriptor = {};
-    deviceDescriptor.label                = "ChuGL Device";
+    WGPUDeviceDescriptor deviceDescriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
+    deviceDescriptor.label                = { "ChuGL Device", WGPU_STRLEN };
     deviceDescriptor.requiredFeatureCount = requiredFeaturesCount;
     deviceDescriptor.requiredFeatures     = requiredFeatures;
 #ifdef WEBGPU_BACKEND_WGPU
     deviceDescriptor.requiredLimits       = &requiredLimits;
+#else
+    deviceDescriptor.requiredLimits       = &context->limits;
 #endif
-    deviceDescriptor.defaultQueue         = { NULL, "ChuGL queue" };
-    deviceDescriptor.deviceLostCallback
-      = [](WGPUDeviceLostReason reason, char const* message, void* /* pUserData */) {
+    deviceDescriptor.defaultQueue.label   = { "ChuGL queue", WGPU_STRLEN };
+    deviceDescriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+    deviceDescriptor.deviceLostCallbackInfo.callback
+      = [](WGPUDevice const*, WGPUDeviceLostReason reason, WGPUStringView message,
+           void*, void*) {
             log_error("Device lost: reason %d", reason);
-            if (message) log_error(" (%s)", message);
+            if (message.data) log_error(" (%.*s)", (int)message.length, message.data);
         };
-    deviceDescriptor.deviceLostUserdata          = NULL;
-#ifndef __EMSCRIPTEN__
-    deviceDescriptor.uncapturedErrorCallbackInfo = {
-        NULL, on_device_error, NULL /* pUserData */
-    };
-#endif
+    deviceDescriptor.uncapturedErrorCallbackInfo.callback = on_device_error;
 
     context->device = request_device(adapter, &deviceDescriptor);
     if (!context->device) return false;
     log_trace("device created");
-
-#ifdef __EMSCRIPTEN__
-    wgpuDeviceSetUncapturedErrorCallback(context->device, on_device_error, NULL);
-#endif
 
     { // set debug callbacks
       // #if defined(WEBGPU_BACKEND_WGPU)
@@ -441,7 +421,7 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
 
     { // create default resources
         WGPUSamplerDescriptor samplerDesc = {};
-        samplerDesc.label                 = "Default Comparison Sampler";
+        samplerDesc.label                 = { "Default Comparison Sampler", WGPU_STRLEN };
         samplerDesc.addressModeU          = WGPUAddressMode_ClampToEdge;
         samplerDesc.addressModeV          = WGPUAddressMode_ClampToEdge;
         samplerDesc.addressModeW          = WGPUAddressMode_ClampToEdge;
@@ -456,7 +436,7 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
           = wgpuDeviceCreateSampler(context->device, &samplerDesc);
 
         WGPUTextureDescriptor desc = {};
-        desc.label                 = "Sentinel Spotlight Depth2DArray";
+        desc.label                 = { "Sentinel Spotlight Depth2DArray", WGPU_STRLEN };
         desc.size                  = { 1, 1, context->limits.maxTextureArrayLayers };
         desc.mipLevelCount         = 1;
         desc.sampleCount           = 1;
@@ -467,7 +447,7 @@ bool GraphicsContext::init(GraphicsContext* context, GLFWwindow* window)
         context->sentinel_spotlight_depth_2d_array
           = wgpuDeviceCreateTexture(context->device, &desc);
 
-        desc.label = "Sentinel Dirlight Depth2DArray";
+        desc.label = { "Sentinel Dirlight Depth2DArray", WGPU_STRLEN };
         context->sentinel_dirlight_depth_2d_array
           = wgpuDeviceCreateTexture(context->device, &desc);
     }
@@ -480,13 +460,13 @@ static WGPUTextureView GraphicsContext_GetNextSurfaceTextureView(GraphicsContext
 {
     // Get the surface texture
     wgpuSurfaceGetCurrentTexture(gctx->surface, &gctx->surface_texture);
-    if (gctx->surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_Success) {
+    if (gctx->surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal) {
         return nullptr;
     }
 
     // Create a view for this surface texture
     WGPUTextureViewDescriptor viewDescriptor = {};
-    viewDescriptor.label                     = "Surface texture view";
+    viewDescriptor.label                     = { "Surface texture view", WGPU_STRLEN };
     viewDescriptor.format         = wgpuTextureGetFormat(gctx->surface_texture.texture);
     viewDescriptor.dimension      = WGPUTextureViewDimension_2D;
     viewDescriptor.baseMipLevel   = 0;
@@ -673,14 +653,16 @@ void VertexBufferLayout::init(VertexBufferLayout* layout, u8 format_count,
         }
 
         layout->attributes[i] = {
+            NULL,       // nextInChain
             formats[i], // format
             0,          // offset
             i,          // shader location
         };
 
         layout->layouts[i] = {
-            wgpuVertexFormatSize(formats[i]), // arrayStride
+            NULL,                             // nextInChain
             WGPUVertexStepMode_Vertex,        // stepMode
+            wgpuVertexFormatSize(formats[i]), // arrayStride
             1,                                // attribute count
             layout->attributes + i,           // vertexAttribute
         };
@@ -726,7 +708,7 @@ WGPUDepthStencilState G_createDepthStencilState(WGPUTextureFormat format,
     stencil.passOp               = WGPUStencilOperation_Keep;
 
     WGPUDepthStencilState depthStencilState = {};
-    depthStencilState.depthWriteEnabled     = enableDepthWrite;
+    depthStencilState.depthWriteEnabled     = enableDepthWrite ? WGPUOptionalBool_True : WGPUOptionalBool_False;
     depthStencilState.format                = format;
     // using WGPUCompareFunction_LessEqual so skybox is rendered correctly
     depthStencilState.depthCompare        = WGPUCompareFunction_LessEqual;
@@ -754,12 +736,11 @@ WGPUShaderModule G_createShaderModule(GraphicsContext* gctx, const char* code,
                                       const char* label)
 {
     std::string preprocessed_code = Shaders_genSource(code);
-    WGPUShaderModuleWGSLDescriptor desc
-      = { { NULL, WGPUSType_ShaderModuleWGSLDescriptor }, // base class
-          preprocessed_code.c_str() };
+    WGPUShaderSourceWGSL desc = WGPU_SHADER_SOURCE_WGSL_INIT;
+    desc.code                 = { preprocessed_code.c_str(), WGPU_STRLEN };
 
-    WGPUShaderModuleDescriptor moduleDesc = {};
-    moduleDesc.label                      = label;
+    WGPUShaderModuleDescriptor moduleDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    moduleDesc.label                      = { label, WGPU_STRLEN };
     moduleDesc.nextInChain                = &desc.chain;
 
     WGPUShaderModule module = wgpuDeviceCreateShaderModule(gctx->device, &moduleDesc);
@@ -856,7 +837,7 @@ void MipMapGenerator_init(GraphicsContext* ctx)
 
     // Create sampler
     WGPUSamplerDescriptor sampler_desc = {};
-    sampler_desc.label                 = "mip map sampler";
+    sampler_desc.label                 = { "mip map sampler", WGPU_STRLEN };
     sampler_desc.addressModeU          = WGPUAddressMode_ClampToEdge;
     sampler_desc.addressModeV          = WGPUAddressMode_ClampToEdge;
     sampler_desc.addressModeW          = WGPUAddressMode_ClampToEdge;
@@ -879,13 +860,13 @@ void MipMapGenerator_init(GraphicsContext* ctx)
         mip_map_generator.vertexState.buffers     = NULL;
         mip_map_generator.vertexState.module
           = G_createShaderModule(ctx, mipMapShader, "mipmap vertex shader");
-        mip_map_generator.vertexState.entryPoint = VS_ENTRY_POINT;
+        mip_map_generator.vertexState.entryPoint = { VS_ENTRY_POINT, WGPU_STRLEN };
 
         // fragment state
         mip_map_generator.fragmentState = {};
         mip_map_generator.fragmentState.module
           = G_createShaderModule(ctx, mipMapShader, "mipmap fragment shader");
-        mip_map_generator.fragmentState.entryPoint  = FS_ENTRY_POINT;
+        mip_map_generator.fragmentState.entryPoint  = { FS_ENTRY_POINT, WGPU_STRLEN };
         mip_map_generator.fragmentState.targetCount = 1;
 
         // don't release shader modules here, they are released in
@@ -942,7 +923,7 @@ static WGPURenderPipeline MipMapGenerator_getPipeline(GraphicsContext* ctx,
 
     WGPURenderPipelineDescriptor pipelineDesc = {};
     // layout: defaults to `auto`
-    pipelineDesc.label       = "mipmap blit render pipeline";
+    pipelineDesc.label       = { "mipmap blit render pipeline", WGPU_STRLEN };
     pipelineDesc.primitive   = primitiveStateDesc;
     pipelineDesc.vertex      = mip_map_generator.vertexState;
     pipelineDesc.fragment    = &mip_map_generator.fragmentState;
@@ -1026,7 +1007,7 @@ void MipMapGenerator_generate(GraphicsContext* ctx, WGPUTexture texture,
     WGPUBindGroup* bind_groups = ALLOCATE_COUNT(WGPUBindGroup, bind_group_count);
 
     WGPUTextureViewDescriptor viewDesc = {};
-    viewDesc.label                     = "src_view";
+    viewDesc.label                     = { "src_view", WGPU_STRLEN };
     viewDesc.aspect                    = WGPUTextureAspect_All;
     viewDesc.baseMipLevel              = 0;
     viewDesc.mipLevelCount             = 1;
@@ -1045,7 +1026,7 @@ void MipMapGenerator_generate(GraphicsContext* ctx, WGPUTexture texture,
             const uint32_t target_mip = view_index + i;
 
             WGPUTextureViewDescriptor mipViewDesc = {};
-            mipViewDesc.label                     = "dst_view";
+            mipViewDesc.label                     = { "dst_view", WGPU_STRLEN };
             mipViewDesc.aspect                    = WGPUTextureAspect_All;
             mipViewDesc.baseMipLevel              = dst_mip_level++;
             mipViewDesc.mipLevelCount             = 1;
@@ -1111,11 +1092,11 @@ void MipMapGenerator_generate(GraphicsContext* ctx, WGPUTexture texture,
             // log_debug("Copying to mip level %d with sizes %d, %d\n", i,
             //           mip_level_size.width, mip_level_size.height);
 
-            WGPUImageCopyTexture mipCopySrc = {};
+            WGPUTexelCopyTextureInfo mipCopySrc = {};
             mipCopySrc.texture              = mip_texture;
             mipCopySrc.mipLevel             = i - 1;
 
-            WGPUImageCopyTexture mipCopyDst = {};
+            WGPUTexelCopyTextureInfo mipCopyDst = {};
             mipCopyDst.texture              = texture;
             mipCopyDst.mipLevel             = i;
 
@@ -1225,12 +1206,12 @@ SamplerConfig Graphics_SamplerConfigFromDesciptor(WGPUSamplerDescriptor* desc)
 // ============================================================================
 
 bool GPU_Buffer::resizeNoCopy(GraphicsContext* gctx, GPU_Buffer* gpu_buffer,
-                              u64 new_size, WGPUBufferUsageFlags usage_flags)
+                              u64 new_size, WGPUBufferUsage usage_flags)
 
 {
 
     u64 capacity               = 0;
-    WGPUBufferUsageFlags usage = 0;
+    WGPUBufferUsage usage = 0;
     if (gpu_buffer->buf) {
         usage    = wgpuBufferGetUsage(gpu_buffer->buf);
         capacity = wgpuBufferGetSize(gpu_buffer->buf);
