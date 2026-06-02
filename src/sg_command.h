@@ -642,7 +642,7 @@ struct SG_Command_G2A_TextureRead : public SG_Command {
     SG_ID texture_id;
     void* data_OWNED; // malloc on graphics thread, free on audio thread
     int size_bytes;   // size of data
-    WGPUBufferMapAsyncStatus status;
+    WGPUMapAsyncStatus status;
 };
 
 struct SG_Command_G2A_FilesDropped : public SG_Command {
@@ -839,7 +839,7 @@ void CQ_PushCommand_WebcamUpdate(SG_Webcam* webcam);
 // ============================================================================
 
 void CQ_PushCommand_G2A_TextureRead(SG_ID id, void* data, int size_bytes,
-                                    WGPUBufferMapAsyncStatus status);
+                                    WGPUMapAsyncStatus status);
 
 void CQ_PushCommand_G2A_TextureSave(Chuck_Event* texture_save_event, int status);
 

@@ -1133,7 +1133,7 @@ void CQ_PushCommand_WebcamUpdate(SG_Webcam* webcam)
 #define cq graphics_to_audio_cq
 
 void CQ_PushCommand_G2A_TextureRead(SG_ID id, void* data, int size_bytes,
-                                    WGPUBufferMapAsyncStatus status)
+                                    WGPUMapAsyncStatus status)
 {
     BEGIN_COMMAND(SG_Command_G2A_TextureRead, SG_COMMAND_G2A_TEXTURE_READ);
     command->texture_id = id;

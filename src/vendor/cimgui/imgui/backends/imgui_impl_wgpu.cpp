@@ -242,20 +242,19 @@ static void SafeRelease(FrameResources& res)
     SafeRelease(res.VertexBufferHost);
 }
 
-static WGPUProgrammableStageDescriptor ImGui_ImplWGPU_CreateShaderModule(const char* wgsl_source)
+static WGPUComputeState ImGui_ImplWGPU_CreateShaderModule(const char* wgsl_source)
 {
     ImGui_ImplWGPU_Data* bd = ImGui_ImplWGPU_GetBackendData();
 
-    WGPUShaderModuleWGSLDescriptor wgsl_desc = {};
-    wgsl_desc.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
-    wgsl_desc.code = wgsl_source;
+    WGPUShaderSourceWGSL wgsl_desc = WGPU_SHADER_SOURCE_WGSL_INIT;
+    wgsl_desc.code = { wgsl_source, WGPU_STRLEN };
 
-    WGPUShaderModuleDescriptor desc = {};
+    WGPUShaderModuleDescriptor desc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
     desc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&wgsl_desc);
 
-    WGPUProgrammableStageDescriptor stage_desc = {};
+    WGPUComputeState stage_desc = WGPU_COMPUTE_STATE_INIT;
     stage_desc.module = wgpuDeviceCreateShaderModule(bd->wgpuDevice, &desc);
-    stage_desc.entryPoint = "main";
+    stage_desc.entryPoint = { "main", WGPU_STRLEN };
     return stage_desc;
 }
 
@@ -368,14 +367,10 @@ IMGUI_IMPL_API void ImGui_ImplWGPU_RenderDrawData(
         SafeRelease(fr->VertexBufferHost);
         fr->VertexBufferSize = draw_data->TotalVtxCount + 5000;
 
-        WGPUBufferDescriptor vb_desc =
-        {
-            nullptr,
-            "Dear ImGui Vertex buffer",
-            WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex,
-            MEMALIGN(fr->VertexBufferSize * sizeof(ImDrawVert), 4),
-            false
-        };
+        WGPUBufferDescriptor vb_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        vb_desc.label = { "Dear ImGui Vertex buffer", WGPU_STRLEN };
+        vb_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+        vb_desc.size  = MEMALIGN(fr->VertexBufferSize * sizeof(ImDrawVert), 4);
         fr->VertexBuffer = wgpuDeviceCreateBuffer(bd->wgpuDevice, &vb_desc);
         if (!fr->VertexBuffer)
             return;
@@ -392,14 +387,10 @@ IMGUI_IMPL_API void ImGui_ImplWGPU_RenderDrawData(
         SafeRelease(fr->IndexBufferHost);
         fr->IndexBufferSize = draw_data->TotalIdxCount + 10000;
 
-        WGPUBufferDescriptor ib_desc =
-        {
-            nullptr,
-            "Dear ImGui Index buffer",
-            WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index,
-            MEMALIGN(fr->IndexBufferSize * sizeof(ImDrawIdx), 4),
-            false
-        };
+        WGPUBufferDescriptor ib_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        ib_desc.label = { "Dear ImGui Index buffer", WGPU_STRLEN };
+        ib_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index;
+        ib_desc.size  = MEMALIGN(fr->IndexBufferSize * sizeof(ImDrawIdx), 4);
         fr->IndexBuffer = wgpuDeviceCreateBuffer(bd->wgpuDevice, &ib_desc);
         if (!fr->IndexBuffer)
             return;
@@ -499,7 +490,7 @@ static void ImGui_ImplWGPU_CreateFontsTexture()
     // Upload texture to graphics system
     {
         WGPUTextureDescriptor tex_desc = {};
-        tex_desc.label = "Dear ImGui Font Texture";
+        tex_desc.label = { "Dear ImGui Font Texture", WGPU_STRLEN };
         tex_desc.dimension = WGPUTextureDimension_2D;
         tex_desc.size.width = width;
         tex_desc.size.height = height;
@@ -523,12 +514,12 @@ static void ImGui_ImplWGPU_CreateFontsTexture()
 
     // Upload texture data
     {
-        WGPUImageCopyTexture dst_view = {};
+        WGPUTexelCopyTextureInfo dst_view = {};
         dst_view.texture = bd->renderResources.FontTexture;
         dst_view.mipLevel = 0;
         dst_view.origin = { 0, 0, 0 };
         dst_view.aspect = WGPUTextureAspect_All;
-        WGPUTextureDataLayout layout = {};
+        WGPUTexelCopyBufferLayout layout = {};
         layout.offset = 0;
         layout.bytesPerRow = width * size_pp;
         layout.rowsPerImage = height;
@@ -564,14 +555,10 @@ static void ImGui_ImplWGPU_CreateFontsTexture()
 static void ImGui_ImplWGPU_CreateUniformBuffer()
 {
     ImGui_ImplWGPU_Data* bd = ImGui_ImplWGPU_GetBackendData();
-    WGPUBufferDescriptor ub_desc =
-    {
-        nullptr,
-        "Dear ImGui Uniform buffer",
-        WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform,
-        MEMALIGN(sizeof(Uniforms), 16),
-        false
-    };
+    WGPUBufferDescriptor ub_desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    ub_desc.label = { "Dear ImGui Uniform buffer", WGPU_STRLEN };
+    ub_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
+    ub_desc.size  = MEMALIGN(sizeof(Uniforms), 16);
     bd->renderResources.Uniforms = wgpuDeviceCreateBuffer(bd->wgpuDevice, &ub_desc);
 }
 
@@ -624,21 +611,22 @@ bool ImGui_ImplWGPU_CreateDeviceObjects()
     graphics_pipeline_desc.layout = wgpuDeviceCreatePipelineLayout(bd->wgpuDevice, &layout_desc);
 
     // Create the vertex shader
-    WGPUProgrammableStageDescriptor vertex_shader_desc = ImGui_ImplWGPU_CreateShaderModule(__shader_vert_wgsl);
+    WGPUComputeState vertex_shader_desc = ImGui_ImplWGPU_CreateShaderModule(__shader_vert_wgsl);
     graphics_pipeline_desc.vertex.module = vertex_shader_desc.module;
     graphics_pipeline_desc.vertex.entryPoint = vertex_shader_desc.entryPoint;
 
     // Vertex input configuration
     WGPUVertexAttribute attribute_desc[] =
     {
-        { WGPUVertexFormat_Float32x2, (uint64_t)offsetof(ImDrawVert, pos), 0 },
-        { WGPUVertexFormat_Float32x2, (uint64_t)offsetof(ImDrawVert, uv),  1 },
-        { WGPUVertexFormat_Unorm8x4,  (uint64_t)offsetof(ImDrawVert, col), 2 },
+        { NULL, WGPUVertexFormat_Float32x2, (uint64_t)offsetof(ImDrawVert, pos), 0 },
+        { NULL, WGPUVertexFormat_Float32x2, (uint64_t)offsetof(ImDrawVert, uv),  1 },
+        { NULL, WGPUVertexFormat_Unorm8x4,  (uint64_t)offsetof(ImDrawVert, col), 2 },
     };
 
     WGPUVertexBufferLayout buffer_layouts[1];
-    buffer_layouts[0].arrayStride = sizeof(ImDrawVert);
+    buffer_layouts[0].nextInChain = NULL;
     buffer_layouts[0].stepMode = WGPUVertexStepMode_Vertex;
+    buffer_layouts[0].arrayStride = sizeof(ImDrawVert);
     buffer_layouts[0].attributeCount = 3;
     buffer_layouts[0].attributes = attribute_desc;
 
@@ -646,7 +634,7 @@ bool ImGui_ImplWGPU_CreateDeviceObjects()
     graphics_pipeline_desc.vertex.buffers = buffer_layouts;
 
     // Create the pixel shader
-    WGPUProgrammableStageDescriptor pixel_shader_desc = ImGui_ImplWGPU_CreateShaderModule(__shader_frag_wgsl);
+    WGPUComputeState pixel_shader_desc = ImGui_ImplWGPU_CreateShaderModule(__shader_frag_wgsl);
 
     // Create the blending setup
     WGPUBlendState blend_state = {};
@@ -673,7 +661,7 @@ bool ImGui_ImplWGPU_CreateDeviceObjects()
     // Create depth-stencil State
     WGPUDepthStencilState depth_stencil_state = {};
     depth_stencil_state.format = bd->depthStencilFormat;
-    depth_stencil_state.depthWriteEnabled = false;
+    depth_stencil_state.depthWriteEnabled = WGPUOptionalBool_False;
     depth_stencil_state.depthCompare = WGPUCompareFunction_Always;
     depth_stencil_state.stencilFront.compare = WGPUCompareFunction_Always;
     depth_stencil_state.stencilFront.failOp = WGPUStencilOperation_Keep;

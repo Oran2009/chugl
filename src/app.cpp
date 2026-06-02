@@ -1286,7 +1286,7 @@ struct App {
             imgui_color_attachment.storeOp = WGPUStoreOp_Store;
 
             WGPURenderPassDescriptor imgui_render_pass_desc = {};
-            imgui_render_pass_desc.label                    = "ImGUI Render Pass";
+            imgui_render_pass_desc.label                    = { "ImGUI Render Pass", WGPU_STRLEN };
             imgui_render_pass_desc.colorAttachmentCount     = 1;
             imgui_render_pass_desc.colorAttachments         = &imgui_color_attachment;
             imgui_render_pass_desc.depthStencilAttachment   = NULL;
@@ -1696,8 +1696,8 @@ struct R_TextureWriteParams {
     Chuck_Event* texture_save_event;
 };
 
-static void TextureSaveOnBufferMap(WGPUBufferMapAsyncStatus status,
-                                   void* udata_MALLOCED)
+static void TextureSaveOnBufferMap(WGPUMapAsyncStatus status,
+                                   WGPUStringView, void* udata_MALLOCED, void*)
 {
     int error               = 0; // nonzero on failure
     R_TextureWriteParams* p = (R_TextureWriteParams*)udata_MALLOCED;
@@ -1710,7 +1710,7 @@ static void TextureSaveOnBufferMap(WGPUBufferMapAsyncStatus status,
     R_Texture* tex           = Component_GetTexture(data->texture_id);
     WGPUTextureFormat format = wgpuTextureGetFormat(tex->gpu_texture);
 
-    if (status != WGPUBufferMapAsyncStatus_Success) {
+    if (status != WGPUMapAsyncStatus_Success) {
         log_error("Unable to save Texture %s to file %s", tex->name,
                   p->filepath_MALLOC);
         return;
@@ -2348,9 +2348,9 @@ static void _R_HandleCommand(App* app, SG_Command* command)
 
             R_Texture* src_texture   = Component_GetTexture(cmd->src_texture_id);
             R_Texture* dst_texture   = Component_GetTexture(cmd->dst_texture_id);
-            WGPUImageCopyTexture src = SG_TextureLocation::wgpuImageCopyTexture(
+            WGPUTexelCopyTextureInfo src = SG_TextureLocation::wgpuImageCopyTexture(
               cmd->src_location, src_texture->gpu_texture);
-            WGPUImageCopyTexture dst = SG_TextureLocation::wgpuImageCopyTexture(
+            WGPUTexelCopyTextureInfo dst = SG_TextureLocation::wgpuImageCopyTexture(
               cmd->dst_location, dst_texture->gpu_texture);
             WGPUExtent3D copy_size
               = { (u32)cmd->width, (u32)cmd->height, (u32)cmd->depth };
@@ -2377,42 +2377,29 @@ static void _R_HandleCommand(App* app, SG_Command* command)
             WGPUBuffer mapped_buffer         = R_Texture::read(&app->gctx, tex);
 
             { // map buffer
-                auto onBufferMapped = [](WGPUBufferMapAsyncStatus status, void* udata) {
-                    BufferMapAsyncData* data = BufferMapAsyncData_Get((intptr_t)udata);
-                    R_Texture* tex           = Component_GetTexture(data->texture_id);
+                auto onBufferMapped
+                  = [](WGPUMapAsyncStatus status, WGPUStringView, void* udata, void*) {
+                        BufferMapAsyncData* data
+                          = BufferMapAsyncData_Get((intptr_t)udata);
+                        R_Texture* tex = Component_GetTexture(data->texture_id);
 
-                    if (status != WGPUBufferMapAsyncStatus_Success) {
-                        CQ_PushCommand_G2A_TextureRead(tex->id, NULL, 0, status);
-                    }
+                        if (status != WGPUMapAsyncStatus_Success) {
+                            CQ_PushCommand_G2A_TextureRead(tex->id, NULL, 0, status);
+                        }
 
-                    // Get a pointer to wherever the driver mapped the GPU memory to
-                    // the RAM
-                    u8* bufferData = (u8*)wgpuBufferGetConstMappedRange(
-                      data->buffer, 0, data->size_bytes);
+                        u8* bufferData = (u8*)wgpuBufferGetConstMappedRange(
+                          data->buffer, 0, data->size_bytes);
 
-                    void* copied_buffer_data = malloc(data->size_bytes);
-                    memcpy(copied_buffer_data, bufferData, data->size_bytes);
+                        void* copied_buffer_data = malloc(data->size_bytes);
+                        memcpy(copied_buffer_data, bufferData, data->size_bytes);
 
-                    // std::cout << "bufferData = [";
-                    // for (int i = 0; i < 16; ++i) {
-                    //     if (i > 0) std::cout << ", ";
-                    //     std::cout << (int)bufferData[i];
-                    // }
-                    // std::cout << "]" << std::endl;
+                        wgpuBufferUnmap(data->buffer);
 
-                    // Then do not forget to unmap the memory
-                    wgpuBufferUnmap(data->buffer);
+                        WGPU_RELEASE_RESOURCE(Buffer, data->buffer);
 
-                    // this also removes from buffer map async data arena
-                    // by setting buffer to null
-                    WGPU_RELEASE_RESOURCE(Buffer, data->buffer);
-
-                    // send data back to CQ
-                    CQ_PushCommand_G2A_TextureRead(tex->id, copied_buffer_data,
-                                                   data->size_bytes, status);
-                };
-
-                // == optimize == use mapped buffer pool
+                        CQ_PushCommand_G2A_TextureRead(tex->id, copied_buffer_data,
+                                                       data->size_bytes, status);
+                    };
 
                 int index                = 0;
                 BufferMapAsyncData* data = BufferMapAsyncData_Add(&index);
@@ -2420,9 +2407,12 @@ static void _R_HandleCommand(App* app, SG_Command* command)
                 data->texture_id         = tex->id;
                 data->size_bytes         = R_Texture::sizeBytes(tex);
 
+                WGPUBufferMapCallbackInfo cbInfo = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
+                cbInfo.mode                      = WGPUCallbackMode_AllowSpontaneous;
+                cbInfo.callback                  = onBufferMapped;
+                cbInfo.userdata1                 = (void*)(intptr_t)index;
                 wgpuBufferMapAsync(mapped_buffer, WGPUMapMode_Read, 0,
-                                   wgpuBufferGetSize(mapped_buffer), onBufferMapped,
-                                   (void*)(intptr_t)index);
+                                   wgpuBufferGetSize(mapped_buffer), cbInfo);
             }
 
         } break;
@@ -2445,9 +2435,12 @@ static void _R_HandleCommand(App* app, SG_Command* command)
                   = strdup((char*)CQ_ReadCommandGetOffset(cmd->filepath_offset));
                 p->texture_save_event = cmd->save_event;
 
+                WGPUBufferMapCallbackInfo saveCbInfo = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
+                saveCbInfo.mode     = WGPUCallbackMode_AllowSpontaneous;
+                saveCbInfo.callback = TextureSaveOnBufferMap;
+                saveCbInfo.userdata1 = p;
                 wgpuBufferMapAsync(mapped_buffer, WGPUMapMode_Read, 0,
-                                   wgpuBufferGetSize(mapped_buffer),
-                                   TextureSaveOnBufferMap, p);
+                                   wgpuBufferGetSize(mapped_buffer), saveCbInfo);
             }
         } break;
         // buffers ----------------------

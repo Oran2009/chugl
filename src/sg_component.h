@@ -110,7 +110,7 @@ struct SG_Component {
 // ============================================================================
 
 struct SG_BufferDesc {
-    WGPUBufferUsageFlags usage;
+    WGPUBufferUsage usage;
     u64 size; // size in bytes
 };
 
@@ -151,7 +151,7 @@ static SG_Sampler SG_SAMPLER_DEFAULT // make this a #define instead?
 // SG_Texture
 // ============================================================================
 
-inline WGPUTextureUsageFlags WGPUTextureUsage_All
+inline WGPUTextureUsage WGPUTextureUsage_All
   = WGPUTextureUsage_CopyDst | WGPUTextureUsage_CopySrc
     | WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
     | WGPUTextureUsage_StorageBinding;
@@ -165,7 +165,7 @@ enum SG_TextureResizeMode : u8 {
 
 struct SG_TextureDesc {
     // for now default to ALL usage flags to simplify
-    WGPUTextureUsageFlags usage      = WGPUTextureUsage_All;
+    WGPUTextureUsage usage      = WGPUTextureUsage_All;
     WGPUTextureDimension dimension   = WGPUTextureDimension_2D;
     WGPUTextureFormat format         = WGPUTextureFormat_RGBA8Unorm;
     SG_TextureResizeMode resize_mode = SG_TextureResizeMode_Fixed;
@@ -204,10 +204,10 @@ struct SG_TextureLocation {
     int origin_y;
     int origin_z;
 
-    static WGPUImageCopyTexture wgpuImageCopyTexture(SG_TextureLocation loc,
+    static WGPUTexelCopyTextureInfo wgpuImageCopyTexture(SG_TextureLocation loc,
                                                      WGPUTexture texture)
     {
-        WGPUImageCopyTexture img = {};
+        WGPUTexelCopyTextureInfo img = {};
         img.texture              = texture;
         img.mipLevel             = loc.mip;
         img.origin = { (u32)loc.origin_x, (u32)loc.origin_y, (u32)loc.origin_z };

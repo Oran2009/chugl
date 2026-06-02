@@ -183,36 +183,13 @@ static void autoUpdateScenegraph(Arena* arena, SG_Scene* scene, Chuck_VM* VM,
     }
 }
 
-static const char* BufferMapAsyncStatusToString(WGPUBufferMapAsyncStatus status)
+static const char* BufferMapAsyncStatusToString(WGPUMapAsyncStatus status)
 {
     switch (status) {
-        case WGPUBufferMapAsyncStatus_Success: {
-            return "Success";
-        } break;
-        case WGPUBufferMapAsyncStatus_ValidationError: {
-            return "Validation Error";
-        } break;
-        case WGPUBufferMapAsyncStatus_Unknown: {
-            return "Unknown";
-        } break;
-        case WGPUBufferMapAsyncStatus_DeviceLost: {
-            return "Device Lost";
-        } break;
-        case WGPUBufferMapAsyncStatus_DestroyedBeforeCallback: {
-            return "Destroyed Before Callback";
-        } break;
-        case WGPUBufferMapAsyncStatus_UnmappedBeforeCallback: {
-            return "Unmapped Before Callback";
-        } break;
-        case WGPUBufferMapAsyncStatus_MappingAlreadyPending: {
-            return "Mapping Already Pending";
-        } break;
-        case WGPUBufferMapAsyncStatus_OffsetOutOfRange: {
-            return "Offset Out Of Range";
-        } break;
-        case WGPUBufferMapAsyncStatus_SizeOutOfRange: {
-            return "Size Out Of Range";
-        } break;
+        case WGPUMapAsyncStatus_Success: return "Success";
+        case WGPUMapAsyncStatus_CallbackCancelled: return "Callback Cancelled";
+        case WGPUMapAsyncStatus_Error: return "Error";
+        case WGPUMapAsyncStatus_Aborted: return "Aborted";
         default: break;
     }
     ASSERT(false);
@@ -238,7 +215,7 @@ static void FlushGraphicsToAudioCQ()
                 if (!texture) break;
 
                 // check status
-                if (cmd->status != WGPUBufferMapAsyncStatus_Success) {
+                if (cmd->status != WGPUMapAsyncStatus_Success) {
                     log_warn("Texture[id=%d, name=%s] read failed with status: %s",
                              texture->id, texture->name,
                              BufferMapAsyncStatusToString(cmd->status));

@@ -1371,7 +1371,7 @@ void R_Scene::rebuildLightInfoBuffer(GraphicsContext* gctx, R_Scene* scene,
                   min_layers };
             snprintf(string_buf, sizeof(string_buf),
                      "Spot shadowmap array for Scene[%d] %s", scene->id, scene->name);
-            shadowmap_desc.label = string_buf;
+            shadowmap_desc.label = WGPU_STR(string_buf);
 
             WGPU_RELEASE_RESOURCE(Texture, scene->spot_shadow_map_array);
             scene->spot_shadow_map_array
@@ -1393,7 +1393,7 @@ void R_Scene::rebuildLightInfoBuffer(GraphicsContext* gctx, R_Scene* scene,
             snprintf(string_buf, sizeof(string_buf),
                      "Directional shadowmap array for Scene[%d] %s", scene->id,
                      scene->name);
-            shadowmap_desc.label = string_buf;
+            shadowmap_desc.label = WGPU_STR(string_buf);
 
             WGPU_RELEASE_RESOURCE(Texture, scene->dir_shadow_map_array);
             scene->dir_shadow_map_array
@@ -1465,7 +1465,7 @@ void R_Scene::rebuildLightInfoBuffer(GraphicsContext* gctx, R_Scene* scene,
                      "Shadow Pass DrawUniforms for Scene[%d:%s], Light[%d:%s]",
                      scene->id, scene->name, light->id, light->name);
             WGPUBufferDescriptor buff_desc = {};
-            buff_desc.label                = string_buf;
+            buff_desc.label                = WGPU_STR(string_buf);
             buff_desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
             buff_desc.size  = shadow_renderlist_count * draw_uniform_size;
 
@@ -2191,7 +2191,7 @@ R_Pass* Component_CreatePass(SG_ID pass_id, WGPUDevice device)
     char label[64];
     snprintf(label, sizeof(label), "Pass[%d] Frame Uniform Buffer", pass_id);
     WGPUBufferDescriptor desc  = {};
-    desc.label                 = label;
+    desc.label                 = WGPU_STR(label);
     desc.usage                 = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
     desc.size                  = NEXT_MULT4(sizeof(FrameUniforms));
     pass->frame_uniform_buffer = wgpuDeviceCreateBuffer(device, &desc);
@@ -2242,7 +2242,7 @@ R_Light* Component_CreateLight(SG_ID id, SG_LightDesc* desc, WGPUDevice device,
     char label[64];
     snprintf(label, sizeof(label), "Light[%d] Frame Uniform Buffer", id);
     WGPUBufferDescriptor buffer_desc = {};
-    buffer_desc.label                = label;
+    buffer_desc.label                = WGPU_STR(label);
     buffer_desc.usage           = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
     buffer_desc.size            = NEXT_MULT4(sizeof(FrameUniforms));
     light->frame_uniform_buffer = wgpuDeviceCreateBuffer(device, &buffer_desc);
