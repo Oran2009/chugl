@@ -911,7 +911,6 @@ struct R_Video : public R_Component {
     static void destroy(R_Video* video);
 };
 
-#ifndef WEBCHUGL_NO_WEBCAM
 // =============================================================================
 // R_Webcam
 // =============================================================================
@@ -926,7 +925,6 @@ struct R_Webcam : public R_Component {
     static void updateTexture(GraphicsContext* gctx, R_Webcam* webcam);
     static void update(SG_Command_WebcamUpdate* cmd);
 };
-#endif // WEBCHUGL_NO_WEBCAM
 
 // =============================================================================
 // Component Manager API
@@ -962,9 +960,7 @@ R_Light* Component_CreateLight(SG_ID id, SG_LightDesc* desc, WGPUDevice device,
                                WGPULimits* limits);
 R_Video* Component_CreateVideo(GraphicsContext* gctx, SG_ID id, const char* filename,
                                SG_Command_VideoUpdate* cmd);
-#ifndef WEBCHUGL_NO_WEBCAM
 R_Webcam* Component_CreateWebcam(SG_Command_WebcamCreate* cmd);
-#endif // WEBCHUGL_NO_WEBCAM
 
 R_Component* Component_GetComponent(SG_ID id);
 WGPUSampler Component_GetSampler(GraphicsContext* gctx, SG_Sampler sampler);
@@ -983,17 +979,13 @@ R_Pass* Component_GetPass(SG_ID id);
 R_Buffer* Component_GetBuffer(SG_ID id);
 R_Light* Component_GetLight(SG_ID id);
 R_Video* Component_GetVideo(SG_ID id);
-#ifndef WEBCHUGL_NO_WEBCAM
 R_Webcam* Component_GetWebcam(SG_ID id);
-#endif // WEBCHUGL_NO_WEBCAM
 
 // be careful to not delete components while iterating
 // returns false upon reachign end of material arena
 bool Component_MaterialIter(size_t* i, R_Material** material);
 bool Component_VideoIter(size_t* i, R_Video** video);
-#ifndef WEBCHUGL_NO_WEBCAM
 bool Component_WebcamIter(size_t* i, R_Webcam** webcam);
-#endif // WEBCHUGL_NO_WEBCAM
 
 // component manager initialization
 void Component_Init(GraphicsContext* gctx);

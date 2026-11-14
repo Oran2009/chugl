@@ -46,9 +46,7 @@ behaviour:
 // Scenegraph ID of the video component
 static t_CKUINT video_component_offset_id = 0;
 #define GET_VIDEO(ckobj) SG_GetVideo(OBJ_MEMBER_UINT(ckobj, video_component_offset_id))
-#ifndef WEBCHUGL_NO_WEBCAM
 #define GET_WEBCAM(ckobj) SG_GetWebcam(OBJ_MEMBER_UINT(ckobj, component_offset_id))
-#endif // WEBCHUGL_NO_WEBCAM
 
 CK_DLL_CTOR(video_ctor);
 CK_DLL_CTOR(video_ctor_with_path);
@@ -81,7 +79,6 @@ CK_DLL_MFUN(video_get_rate);
 CK_DLL_MFUN(video_set_loop);
 CK_DLL_MFUN(video_get_loop);
 
-#ifndef WEBCHUGL_NO_WEBCAM
 //
 // webcam
 //
@@ -101,7 +98,6 @@ CK_DLL_MFUN(webcam_get_fps);
 CK_DLL_MFUN(webcam_get_texture);
 CK_DLL_MFUN(webcam_get_device_id);
 CK_DLL_MFUN(webcam_get_device_name);
-#endif // WEBCHUGL_NO_WEBCAM
 
 void ulib_video_query(Chuck_DL_Query* QUERY)
 {
@@ -270,7 +266,6 @@ void ulib_video_query(Chuck_DL_Query* QUERY)
         END_CLASS();
     }
 
-#ifndef WEBCHUGL_NO_WEBCAM
     { // webcam
         BEGIN_CLASS(SG_CKNames[SG_COMPONENT_WEBCAM], SG_CKNames[SG_COMPONENT_BASE]);
         DOC_CLASS(
@@ -348,7 +343,6 @@ void ulib_video_query(Chuck_DL_Query* QUERY)
 
         END_CLASS();
     }
-#endif // WEBCHUGL_NO_WEBCAM
 }
 
 // (Chuck_Object* SELF, SAMPLE* in, SAMPLE* out, t_CKUINT nframes,CK_DL_API API)
@@ -707,7 +701,6 @@ CK_DLL_MFUN(video_seek)
     CQ_PushCommand_VideoSeek(video->id, out_seek_time);
 }
 
-#ifndef WEBCHUGL_NO_WEBCAM
 // =================================================================================================
 // webcam
 // =================================================================================================
@@ -799,4 +792,3 @@ CK_DLL_MFUN(webcam_get_freeze)
 {
     RETURN->v_int = GET_WEBCAM(SELF)->freeze;
 }
-#endif // WEBCHUGL_NO_WEBCAM

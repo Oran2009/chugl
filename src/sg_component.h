@@ -1013,7 +1013,6 @@ struct SG_Video : public SG_Component {
 };
 
 // ============================================================================
-#ifndef WEBCHUGL_NO_WEBCAM
 // webcam
 // ============================================================================
 
@@ -1025,7 +1024,6 @@ struct SG_Webcam : public SG_Component {
     bool capture = true;
     char device_name[64];
 };
-#endif // WEBCHUGL_NO_WEBCAM
 
 // ============================================================================
 // SG Component Manager
@@ -1056,10 +1054,8 @@ SG_Material* SG_CreateMaterial(Chuck_Object* ckobj, SG_MaterialType material_typ
 SG_Mesh* SG_CreateMesh(Chuck_Object* ckobj, SG_Geometry* sg_geo, SG_Material* sg_mat);
 SG_Light* SG_CreateLight(Chuck_Object* ckobj);
 SG_Video* SG_CreateVideo(Chuck_Object* ckobj, t_CKUINT id_offset);
-#ifndef WEBCHUGL_NO_WEBCAM
 SG_Webcam* SG_CreateWebcam(Chuck_Object* ckobj, Chuck_VM_Shred* shred, int device_id,
                            int width, int height, int fps);
-#endif // WEBCHUGL_NO_WEBCAM
 
 SG_Component* SG_GetComponent(SG_ID id);
 SG_Transform* SG_GetTransform(SG_ID id);
@@ -1075,9 +1071,7 @@ SG_Pass* SG_GetPass(SG_ID id);
 SG_Buffer* SG_GetBuffer(SG_ID id);
 SG_Light* SG_GetLight(SG_ID id);
 SG_Video* SG_GetVideo(SG_ID id);
-#ifndef WEBCHUGL_NO_WEBCAM
 SG_Webcam* SG_GetWebcam(SG_ID id);
-#endif // WEBCHUGL_NO_WEBCAM
 
 // ============================================================================
 // SG Garbage Collection

@@ -1111,7 +1111,6 @@ void CQ_PushCommand_VideoTextureMode(SG_Video* video, SG_Video_TextureMode mode)
     END_COMMAND();
 }
 
-#ifndef WEBCHUGL_NO_WEBCAM
 void CQ_PushCommand_WebcamCreate(SG_Webcam* webcam, sr_webcam_device* device)
 {
     BEGIN_COMMAND(SG_Command_WebcamCreate, SG_COMMAND_WEBCAM_CREATE);
@@ -1130,7 +1129,6 @@ void CQ_PushCommand_WebcamUpdate(SG_Webcam* webcam)
     command->capture   = webcam->capture;
     END_COMMAND();
 }
-#endif // WEBCHUGL_NO_WEBCAM
 
 #undef cq
 

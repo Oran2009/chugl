@@ -41,9 +41,7 @@
 
 #include <glm/gtx/matrix_decompose.hpp>
 
-#ifndef WEBCHUGL_NO_WEBCAM
 #include <sr_webcam/include/sr_webcam.h>
-#endif // WEBCHUGL_NO_WEBCAM
 
 #include <sokol/sokol_time.h>
 
@@ -1782,9 +1780,7 @@ static Arena cameraArena;
 static Arena textArena;
 static Arena lightArena;
 static Arena videoArena;
-#ifndef WEBCHUGL_NO_WEBCAM
 static Arena webcamArena;
-#endif // WEBCHUGL_NO_WEBCAM
 
 // maps from id --> offset
 static hashmap* r_locator = NULL;
@@ -1794,7 +1790,6 @@ static hashmap* r_locator = NULL;
 static R_Font component_fonts[128];
 static int component_font_count = 0;
 
-#ifndef WEBCHUGL_NO_WEBCAM
 // webcam
 /*
 set user data to be the device id
@@ -1818,7 +1813,6 @@ struct R_WebcamData {
 
 // stores webcam pixel data, device id is the key
 static R_WebcamData _r_webcam_data[8] = {}; // supports up to 8 webcams
-#endif // WEBCHUGL_NO_WEBCAM
 
 struct R_Location {
     SG_ID id;     // key
@@ -1857,9 +1851,7 @@ void Component_Init(GraphicsContext* gctx)
     Arena::init(&bufferArena, sizeof(R_Buffer) * 64);
     Arena::init(&lightArena, sizeof(R_Light) * 16);
     Arena::init(&videoArena, sizeof(R_Video) * 16);
-#ifndef WEBCHUGL_NO_WEBCAM
     Arena::init(&webcamArena, sizeof(R_Webcam) * 8);
-#endif // WEBCHUGL_NO_WEBCAM
 
     // init locator
     int seed = time(NULL);
@@ -1888,7 +1880,6 @@ void Component_Free()
     hashmap_free(r_locator);
     r_locator = NULL;
 
-#ifndef WEBCHUGL_NO_WEBCAM
     // free webcam (doesn't crash)
     for (int i = 0; i < ARRAY_LENGTH(_r_webcam_data); i++) {
         if (_r_webcam_data[i].webcam) {
@@ -1897,7 +1888,6 @@ void Component_Free()
             _r_webcam_data[i].webcam = NULL;
         }
     }
-#endif // WEBCHUGL_NO_WEBCAM
 }
 
 // analgous to audio thread's `_SG_ComponentManagerFree`
@@ -2488,7 +2478,6 @@ R_Video* Component_CreateVideo(GraphicsContext* gctx, SG_ID id, const char* file
     return video;
 }
 
-#ifndef WEBCHUGL_NO_WEBCAM
 void R_Webcam::updateTexture(GraphicsContext* gctx, R_Webcam* webcam)
 {
     if (webcam->freeze) return;
@@ -2610,7 +2599,6 @@ R_Webcam* Component_CreateWebcam(SG_Command_WebcamCreate* cmd)
 
     return webcam;
 }
-#endif // WEBCHUGL_NO_WEBCAM
 
 // linear search by font path, lazily creates if not found
 R_Font* Component_GetFont(GraphicsContext* gctx, FT_Library library,
@@ -2744,14 +2732,12 @@ R_Video* Component_GetVideo(SG_ID id)
     return (R_Video*)comp;
 }
 
-#ifndef WEBCHUGL_NO_WEBCAM
 R_Webcam* Component_GetWebcam(SG_ID id)
 {
     R_Component* comp = Component_GetComponent(id);
     ASSERT(comp == NULL || comp->type == SG_COMPONENT_WEBCAM);
     return (R_Webcam*)comp;
 }
-#endif // WEBCHUGL_NO_WEBCAM
 
 bool Component_MaterialIter(size_t* i, R_Material** material)
 {
@@ -2777,7 +2763,6 @@ bool Component_VideoIter(size_t* i, R_Video** video)
     return true;
 }
 
-#ifndef WEBCHUGL_NO_WEBCAM
 bool Component_WebcamIter(size_t* i, R_Webcam** webcam)
 {
     if (*i >= ARENA_LENGTH(&webcamArena, R_Webcam)) {
@@ -2789,7 +2774,6 @@ bool Component_WebcamIter(size_t* i, R_Webcam** webcam)
     ++(*i);
     return true;
 }
-#endif // WEBCHUGL_NO_WEBCAM
 
 // =============================================================================
 // R_Shader
