@@ -228,6 +228,14 @@ CK_DLL_GFUN(ggen_op_ungruck_array);
 CK_DLL_MFUN(ggen_detach_parent);
 CK_DLL_MFUN(ggen_detach_children);
 CK_DLL_MFUN(ggen_detach_all);
+CK_DLL_MFUN(ggen_detach_subgraph);
+
+// component type matching API (thanks Niccolo!)
+CK_DLL_MFUN(ggen_isa);
+CK_DLL_MFUN(ggen_find_parent);
+CK_DLL_MFUN(ggen_find_parents);
+CK_DLL_MFUN(ggen_find_child);
+CK_DLL_MFUN(ggen_find_children);
 
 // shadow API
 CK_DLL_MFUN(gmesh_get_shadowed);
@@ -585,12 +593,65 @@ static void ulib_ggen_query(Chuck_DL_Query* QUERY)
           "Detach this GGen from its parent and all children. children are NOT "
           "reparented");
 
+        MFUN(ggen_detach_subgraph, "void", "detachSubgraph");
+        DOC_FUNC(
+          "Detach the entire subgraph beginning at this GGen. All ggens will be disconnected "
+          "from each other. Neccessary for freeing / garbage collecting an entire group of GGens."
+        );
+
         MFUN(ggen_set_shadowed_all_children, "void", "shadowed");
         ARG("int", "receive_shadows");
         ARG("int", "apply_to_subgraph");
         DOC_FUNC(
           "Set whether this GGen and all children can receive shadows. See "
           "GMesh.shadowed(int) for more details on how this flag works");
+
+        { // ggen component type matching methods
+            MFUN(ggen_isa, "int", "isa");
+            ARG("Type", "type");
+            DOC_FUNC(
+                "Get whether this GGen is a given type. E.g. `ggen.isa(GMesh) => int is_mesh;` "
+            );
+
+            MFUN(ggen_find_parent, "GGen", "findParent");
+            ARG("Type", "type");
+            DOC_FUNC(
+                "Find the first parent of type. "
+                "Returns null if none found. "
+                "`ggen.findParent(GMesh) $ GMesh @=> GMesh parent_mesh;`"
+            );
+
+            MFUN(ggen_find_parents, "GGen[]", "findParents");
+            ARG("Type", "type");
+            DOC_FUNC(
+                "Find all parents of type. " 
+                "The returned array is ordered from nearest-to-farthest parent relationship. "
+                "If none are found, returns an empty array. "
+                "`ggen.findParents(GMesh) @=> GGen parent_meshes[];` "
+            );
+
+            MFUN(ggen_find_child, "GGen", "findChild");
+            ARG("Type", "type");
+            ARG("int", "recurse");
+            DOC_FUNC(
+                "Find the first child of type. This is *not* guaranteed to be the first child created or added to the scenegraph. "
+                "If recurse=true, will recursively search children of children, breadth-first. "
+                "Returns null if none found. "
+                "`ggen.findChild(GMesh, false) $ GMesh @=> GMesh child_mesh;`"
+            );
+
+            MFUN(ggen_find_children, "GGen[]", "findChildren");
+            ARG("Type", "type");
+            ARG("int", "recurse");
+            DOC_FUNC(
+                "Find all children of type. This is *not* ordered in any way. "
+                "If recurse=true, will recursively search children of children, breadth-first. "
+                "Returns an empty array if none found. "
+                "`ggen.findChildren(GMesh, true) @=> GGen child_meshes[];`"
+            );
+
+        }
+        
 
         QUERY->end_class(QUERY); // GGen
     }
@@ -1239,6 +1300,135 @@ CK_DLL_MFUN(ggen_detach_all)
     CQ_PushCommand_RemoveAllChildren(child);
 }
 
+CK_DLL_MFUN(ggen_detach_subgraph)
+{
+    SG_Transform::removeSubgraph(SG_GetTransform(OBJ_MEMBER_UINT(SELF, component_offset_id)));
+}
+
+CK_DLL_MFUN(ggen_isa)
+{
+    Chuck_Type* this_type = API->object->get_type(SELF);
+    Chuck_Type* other_type = GET_NEXT_TYPE(ARGS);
+    RETURN->v_int = API->type->isa(this_type, other_type);
+}
+
+CK_DLL_MFUN(ggen_find_parent)
+{
+    Chuck_Type* target_type = GET_NEXT_TYPE(ARGS);
+    SG_Transform* xform = SG_GetTransform(OBJ_MEMBER_UINT(SELF, component_offset_id));
+    SG_Transform* parent = SG_GetTransform(xform->parentID);
+    while (parent) {
+        Chuck_Type* parent_type = API->object->get_type(parent->ckobj);
+        if (API->type->isa(parent_type, target_type)) {
+            RETURN->v_object = parent->ckobj;
+            return;
+        }
+        parent = SG_GetTransform(parent->parentID);
+    }
+}
+
+CK_DLL_MFUN(ggen_find_parents)
+{
+    Chuck_Type* target_type = GET_NEXT_TYPE(ARGS);
+    SG_Transform* xform = SG_GetTransform(OBJ_MEMBER_UINT(SELF, component_offset_id));
+    SG_Transform* parent = SG_GetTransform(xform->parentID);
+
+    Chuck_ArrayInt* arr = (Chuck_ArrayInt*)chugin_createCkObj("GGen[]", false, SHRED);
+    RETURN->v_object = (Chuck_Object*) arr;
+
+    while (parent) {
+        Chuck_Type* parent_type = API->object->get_type(parent->ckobj);
+        if (API->type->isa(parent_type, target_type)) {
+            API->object->array_int_push_back(arr, (t_CKUINT)parent->ckobj);
+        }
+        parent = SG_GetTransform(parent->parentID);
+    }
+}
+
+CK_DLL_MFUN(ggen_find_child)
+{
+    SG_Transform* xform = SG_GetTransform(OBJ_MEMBER_UINT(SELF, component_offset_id));
+    Chuck_Type* target_type = GET_NEXT_TYPE(ARGS);
+    bool recurse = GET_NEXT_INT(ARGS);
+    int num_children = SG_Transform::numChildren(xform);
+
+    if (!recurse) {
+        for (int i = 0; i < num_children; i++) {
+            Chuck_Object* child = SG_Transform::child(xform, i)->ckobj;
+            Chuck_Type* child_type = API->object->get_type(child);
+            if (API->type->isa(child_type, target_type)) {
+                RETURN->v_object = child;
+                return;
+            }
+        }
+    } else {
+        u64 curr_offset = audio_frame_arena.curr;
+        memcpy(
+            ARENA_PUSH_COUNT(&audio_frame_arena, SG_ID, num_children), 
+            xform->childrenIDs.base, 
+            sizeof(SG_ID) * num_children
+        );
+        while (curr_offset < audio_frame_arena.curr) {
+            SG_Transform* child = SG_GetTransform(*(SG_ID*) Arena::get(&audio_frame_arena, curr_offset));
+            Chuck_Type* child_type = API->object->get_type(child->ckobj);
+            if (API->type->isa(child_type, target_type)) {
+                RETURN->v_object = child->ckobj;
+                return;
+            }
+            // else add children
+            memcpy(
+                ARENA_PUSH_COUNT(&audio_frame_arena, SG_ID, SG_Transform::numChildren(child)),
+                child->childrenIDs.base,
+                sizeof(SG_ID) * SG_Transform::numChildren(child)
+            );
+            curr_offset += sizeof(SG_ID);
+        }
+    }
+}
+
+CK_DLL_MFUN(ggen_find_children)
+{
+    SG_Transform* xform = SG_GetTransform(OBJ_MEMBER_UINT(SELF, component_offset_id));
+    Chuck_Type* target_type = GET_NEXT_TYPE(ARGS);
+    bool recurse = GET_NEXT_INT(ARGS);
+    int num_children = SG_Transform::numChildren(xform);
+
+    Chuck_ArrayInt* arr = (Chuck_ArrayInt*)chugin_createCkObj("GGen[]", false, SHRED);
+    RETURN->v_object = (Chuck_Object*) arr;
+
+    if (!recurse) {
+        for (int i = 0; i < num_children; i++) {
+            Chuck_Object* child = SG_Transform::child(xform, i)->ckobj;
+            Chuck_Type* child_type = API->object->get_type(child);
+            if (API->type->isa(child_type, target_type)) {
+                API->object->array_int_push_back(arr, (t_CKUINT)child);
+            }
+        }
+    } else {
+        u64 curr_offset = audio_frame_arena.curr;
+        memcpy(
+            ARENA_PUSH_COUNT(&audio_frame_arena, SG_ID, num_children), 
+            xform->childrenIDs.base, 
+            sizeof(SG_ID) * num_children
+        );
+        while (curr_offset < audio_frame_arena.curr) {
+            SG_Transform* child = SG_GetTransform(*(SG_ID*) Arena::get(&audio_frame_arena, curr_offset));
+            Chuck_Type* child_type = API->object->get_type(child->ckobj);
+            if (API->type->isa(child_type, target_type)) {
+                API->object->array_int_push_back(arr, (t_CKUINT)child->ckobj);
+            }
+            memcpy(
+                ARENA_PUSH_COUNT(&audio_frame_arena, SG_ID, SG_Transform::numChildren(child)),
+                child->childrenIDs.base,
+                sizeof(SG_ID) * SG_Transform::numChildren(child)
+            );
+            curr_offset += sizeof(SG_ID);
+        }
+    }
+
+}
+
+
 CK_DLL_MFUN(ggen_get_parent)
 {
     SG_Transform* xform = SG_GetTransform(OBJ_MEMBER_UINT(SELF, component_offset_id));
@@ -1274,7 +1464,7 @@ CK_DLL_MFUN(ggen_get_num_children)
 CK_DLL_MFUN(ggen_get_scene)
 {
     SG_Transform* xform = SG_GetTransform(OBJ_MEMBER_UINT(SELF, component_offset_id));
-    SG_Scene* scene     = SG_GetScene(xform->scene_id);
+    SG_Scene* scene     = SG_GetScene(xform->_scene_id);
     RETURN->v_object    = scene ? scene->ckobj : NULL;
 }
 
@@ -1784,8 +1974,8 @@ CK_DLL_CTOR(gmesh_ctor_params)
     Chuck_Object* ck_geo = GET_NEXT_OBJECT(ARGS);
     Chuck_Object* ck_mat = GET_NEXT_OBJECT(ARGS);
 
-    SG_Geometry* sg_geo = SG_GetGeometry(OBJ_MEMBER_UINT(ck_geo, component_offset_id));
-    SG_Material* sg_mat = SG_GetMaterial(OBJ_MEMBER_UINT(ck_mat, component_offset_id));
+    SG_Geometry* sg_geo = ck_geo ? SG_GetGeometry(OBJ_MEMBER_UINT(ck_geo, component_offset_id)) : NULL;
+    SG_Material* sg_mat = ck_mat ? SG_GetMaterial(OBJ_MEMBER_UINT(ck_mat, component_offset_id)) : NULL;
 
     ulib_mesh_create(SELF, sg_geo, sg_mat, SHRED);
 }
@@ -1879,7 +2069,6 @@ CK_DLL_MFUN(ggen_set_shadowed_all_children)
         }
     }
 }
-
 // GLines2D ===============================================================
 
 static void ulib_mesh_create_gshape(Chuck_Object* ckobj, SG_GeometryType geo_type,
@@ -2129,7 +2318,7 @@ CK_DLL_MFUN(gpoints_mat_get_sampler)
 
 CK_DLL_MFUN(gpoints_mat_get_texture)
 {
-    SG_Texture* tex = SG_GetTexture(GET_MESH_MATERIAL(SELF)->uniforms[3].as.texture_id);
+    SG_Texture* tex  = SG_GetTexture(GET_MESH_MATERIAL(SELF)->uniforms[3].as.sg_id);
     RETURN->v_object = tex ? tex->ckobj : NULL;
 }
 

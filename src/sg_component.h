@@ -227,6 +227,7 @@ struct SG_Texture : SG_Component {
     Chuck_Event* texture_read_event;
 
     static void updateTextureData(SG_Texture* texture, void* data, int data_size_bytes);
+    static void destroy(SG_Texture* texture);
 };
 
 // ============================================================================
@@ -241,12 +242,13 @@ struct SG_Transform : public SG_Component {
     // relationships
     SG_ID parentID;
     Arena childrenIDs;
-    SG_ID scene_id; // the scene this transform belongs to
+    SG_ID _scene_id; // the scene this transform belongs to
 
     // TODO: come up with staleness scheme that makes sense for scenegraph
 
     // don't init directly. Use SG Component Manager instead
     static void _init(SG_Transform* t, Chuck_Object* ckobj);
+    static void destroy(SG_Transform* t);
 
     static void translate(SG_Transform* t, glm::vec3 delta);
     static void rotate(SG_Transform* t, glm::quat q);
@@ -277,6 +279,7 @@ struct SG_Transform : public SG_Component {
     static void addChild(SG_Transform* parent, SG_Transform* child);
     static void removeChild(SG_Transform* parent, SG_Transform* child);
     static void removeAllChildren(SG_Transform* parent);
+    static void removeSubgraph(SG_Transform* root);
     static bool isAncestor(SG_Transform* ancestor, SG_Transform* descendent);
     static size_t numChildren(SG_Transform* t);
     static SG_Transform* child(SG_Transform* t, size_t index);
@@ -411,6 +414,8 @@ struct SG_Geometry : SG_Component {
     static void buildKnot(SG_Geometry* g, KnotParams* p);
     static void buildPolygon(SG_Geometry* g, PolygonParams* p);
     static void buildPolyhedron(SG_Geometry* g, PolyhedronType* p);
+
+    static void destroy(SG_Geometry* g);
 };
 
 // ============================================================================
@@ -519,7 +524,8 @@ enum SG_MaterialUniformType : u8 {
     SG_MATERIAL_UNIFORM_IVEC4,
     SG_MATERIAL_UNIFORM_TEXTURE,
     SG_MATERIAL_UNIFORM_SAMPLER,
-    SG_MATERIAL_UNIFORM_STORAGE_BUFFER,
+    SG_MATERIAL_UNIFORM_STORAGE_BUFFER, // copies data from ck array, data only sent to
+                                        // render thread
     SG_MATERIAL_UNIFORM_STORAGE_BUFFER_EXTERNAL,
     SG_MATERIAL_STORAGE_TEXTURE,
 };
@@ -534,8 +540,7 @@ union SG_MaterialUniformData {
     glm::ivec3 ivec3;
     glm::ivec4 ivec4;
     SG_Sampler sampler;
-    SG_ID texture_id;
-    SG_ID storage_buffer_id;
+    SG_ID sg_id;
     // TODO arena for storage buffer
 };
 
@@ -620,47 +625,55 @@ struct SG_Material : SG_Component {
 
     static void uniformInt(SG_Material* mat, int location, int value)
     {
+        removeUniform(mat, location);
         mat->uniforms[location].type = SG_MATERIAL_UNIFORM_INT;
         mat->uniforms[location].as.i = value;
     }
 
     static void uniformFloat(SG_Material* mat, int location, f32 value)
     {
+        removeUniform(mat, location);
         mat->uniforms[location].type = SG_MATERIAL_UNIFORM_FLOAT;
         mat->uniforms[location].as.f = value;
     }
 
     static void uniformVec2f(SG_Material* mat, int location, glm::vec2 value)
     {
+        removeUniform(mat, location);
         mat->uniforms[location].type     = SG_MATERIAL_UNIFORM_VEC2F;
         mat->uniforms[location].as.vec2f = value;
     }
 
     static void uniformVec3f(SG_Material* mat, int location, glm::vec3 value)
     {
+        removeUniform(mat, location);
         mat->uniforms[location].type     = SG_MATERIAL_UNIFORM_VEC3F;
         mat->uniforms[location].as.vec3f = value;
     }
 
     static void uniformVec4f(SG_Material* mat, int location, glm::vec4 value)
     {
+        removeUniform(mat, location);
         mat->uniforms[location].type     = SG_MATERIAL_UNIFORM_VEC4F;
         mat->uniforms[location].as.vec4f = value;
     }
 
     static void setStorageBuffer(SG_Material* mat, int location)
     {
+        removeUniform(mat, location);
         mat->uniforms[location].type = SG_MATERIAL_UNIFORM_STORAGE_BUFFER;
     }
 
     static void storageBuffer(SG_Material* mat, int location, SG_Buffer* buffer)
     {
-        mat->uniforms[location].type = SG_MATERIAL_UNIFORM_STORAGE_BUFFER_EXTERNAL;
-        mat->uniforms[location].as.storage_buffer_id = buffer->id;
+        removeUniform(mat, location);
+        mat->uniforms[location].type     = SG_MATERIAL_UNIFORM_STORAGE_BUFFER_EXTERNAL;
+        mat->uniforms[location].as.sg_id = buffer->id;
     }
 
     static void setSampler(SG_Material* mat, int location, SG_Sampler sampler)
     {
+        removeUniform(mat, location);
         mat->uniforms[location].type       = SG_MATERIAL_UNIFORM_SAMPLER;
         mat->uniforms[location].as.sampler = sampler;
     }
@@ -670,6 +683,7 @@ struct SG_Material : SG_Component {
     static void setStorageTexture(SG_Material* mat, int location, SG_Texture* tex);
 
     static void shader(SG_Material* mat, SG_Shader* shader);
+    static void destroy(SG_Material* mat);
 };
 
 // ============================================================================
@@ -684,9 +698,11 @@ struct SG_Mesh : SG_Transform {
     SG_ID _geo_id;
     SG_ID _mat_id;
     b32 receives_shadows;
+    b32 is_text;
 
     static void setGeometry(SG_Mesh* mesh, SG_Geometry* geo);
     static void setMaterial(SG_Mesh* mesh, SG_Material* mat);
+    static void destroy(SG_Mesh* mesh);
 };
 
 // ============================================================================
@@ -808,6 +824,8 @@ struct SG_Text : public SG_Mesh {
     float width;
     SG_Text_AlignmentType alignment;
     float size = 1.0f;
+
+    static void destroy(SG_Text* text);
 };
 
 // ============================================================================
@@ -891,6 +909,8 @@ struct SG_Pass : public SG_Component {
     // bloom pass methods
     static void bloomInputRenderTexture(SG_Pass* pass, SG_Texture* tex);
     static void bloomOutputRenderTexture(SG_Pass* pass, SG_Texture* tex);
+
+    static void destroy(SG_Pass* pass);
 };
 
 // ============================================================================
@@ -988,6 +1008,8 @@ struct SG_Video : public SG_Component {
     {
         return (int)(video->duration_secs * video->samplerate);
     }
+
+    static void destroy(SG_Video* video);
 };
 
 // ============================================================================
@@ -1063,5 +1085,6 @@ SG_Webcam* SG_GetWebcam(SG_ID id);
 
 void SG_DecrementRef(SG_ID id);
 void SG_AddRef(SG_Component* comp);
+int SG_Refcount(SG_Component* comp);
 void SG_GC();
 void SG_ComponentFree(SG_Component* comp);

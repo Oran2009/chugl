@@ -350,7 +350,8 @@ void ulib_pass_query(Chuck_DL_Query* QUERY)
         DOC_FUNC(
           "Set the screen shader to apply to the screen. In your screen shader be sure "
           "to #include SCREEN_PASS_VERTEX_SHADER which supplies your fragment shader "
-          "with a full-screen quad");
+          "with a full-screen quad. Will automatically set the shader's vertex layout to "
+          "null, as a ScreenPass does not operate on geometry vertex buffers");
 
         END_CLASS();
     }
@@ -578,9 +579,9 @@ SG_Pass* ulib_pass_create(SG_PassType pass_type, Chuck_Object* pass_ckobj, bool 
             // create default output render texture, which is always resized to match
             // input texture
             SG_TextureDesc output_render_texture_desc = {};
-            output_render_texture_desc.usage = WGPUTextureUsage_RenderAttachment
-                                               | WGPUTextureUsage_TextureBinding
-                                               | WGPUTextureUsage_StorageBinding;
+            output_render_texture_desc.usage        = WGPUTextureUsage_RenderAttachment
+                                                      | WGPUTextureUsage_TextureBinding
+                                                      | WGPUTextureUsage_StorageBinding;
             output_render_texture_desc.format       = WGPUTextureFormat_RGBA16Float;
             output_render_texture_desc.resize_mode  = SG_TextureResizeMode_Ratio;
             output_render_texture_desc.width_ratio  = 1.0f;
@@ -869,7 +870,7 @@ CK_DLL_MFUN(scenepass_set_scene_and_camera)
     SG_ID scene_id    = sg_scene ? sg_scene->id : 0;
     SG_Camera* sg_cam = camera ? GET_CAMERA(camera) : NULL;
 
-    if (sg_cam && sg_cam->scene_id != scene_id) {
+    if (sg_cam && sg_cam->_scene_id != scene_id) {
         log_warn(
           "ScenePass.scene(GScene, GCamera) failed: camera does not belong to scene. "
           "suggestion: connect with `camera --> scene;`");
@@ -912,6 +913,18 @@ CK_DLL_MFUN(scenepass_set_msaa)
 // ScreenPass
 // ============================================================================
 
+static void screenpass_clear_shader_vertex_layout(SG_Shader* shader, SG_Pass* pass) {
+    if (shader) {
+        if (shader->vertex_layout[0] != 0) {
+            log_warn("Setting Shader[%d:%s] vertex layout to null on ScenePass[%d:%s].",
+                shader->id, shader->name, pass->id, pass->name
+            );
+            ZERO_ARRAY(shader->vertex_layout);
+            CQ_PushCommand_ShaderClearVertexLayout(shader);
+        }
+    }
+}
+
 CK_DLL_CTOR(screenpass_ctor_with_shader)
 {
     // get the arguments
@@ -923,6 +936,9 @@ CK_DLL_CTOR(screenpass_ctor_with_shader)
     ASSERT(shader);
     SG_Pass* pass = GET_PASS(SELF);
     ASSERT(pass && pass->pass_type == SG_PassType_Screen);
+
+    // set vertex layout to null
+    screenpass_clear_shader_vertex_layout(shader, pass);
 
     SG_Material* screen_material = SG_GetMaterial(pass->screen_material_id);
     ASSERT(screen_material);
@@ -944,6 +960,9 @@ CK_DLL_MFUN(screenpass_set_shader)
     SG_Shader* shader
       = shader_obj ? SG_GetShader(OBJ_MEMBER_UINT(shader_obj, component_offset_id)) :
                      NULL;
+
+    // set vertex layout to null
+    screenpass_clear_shader_vertex_layout(shader, pass);
 
     SG_Material* mat = SG_GetMaterial(pass->screen_material_id);
     ASSERT(mat);
@@ -984,9 +1003,8 @@ SG_Pass* ulib_pass_create_output_pass(SG_Pass* pass, Chuck_Object* ckobj, bool a
 
 CK_DLL_CTOR(outputpass_ctor)
 {
-    SG_Pass* pass = GET_PASS(SELF);
+    SG_Pass* pass = ulib_pass_create_output_pass(GET_PASS(SELF), SELF, false, SHRED);
     ASSERT(pass && pass->pass_type == SG_PassType_Screen);
-    ulib_pass_create_output_pass(pass, SELF, false, SHRED);
 }
 
 CK_DLL_MFUN(outputpass_set_input_texture)

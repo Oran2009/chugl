@@ -59,6 +59,7 @@
 #define GET_NEXT_VEC3_ARRAY(ptr) (*((Chuck_ArrayVec3**&)ptr)++)
 #define GET_NEXT_VEC4_ARRAY(ptr) (*((Chuck_ArrayVec4**&)ptr)++)
 #define GET_NEXT_OBJECT_ARRAY(ptr) (*((Chuck_ArrayInt**&)ptr)++)
+#define GET_NEXT_TYPE(ptr) (*((Chuck_Type**&)ptr)++)
 
 #define GET_XFORM(ckobj) SG_GetTransform(OBJ_MEMBER_UINT(ckobj, component_offset_id));
 #define GET_MESH(ckobj) SG_GetMesh(OBJ_MEMBER_UINT(ckobj, component_offset_id))
@@ -602,7 +603,7 @@ struct PhongParams {
 
     static SG_Texture* albedoTex(SG_Material* mat)
     {
-        return SG_GetTexture(mat->uniforms[7].as.texture_id);
+        return SG_GetTexture(mat->uniforms[7].as.sg_id);
     }
 
     static void specularTex(SG_Material* mat, SG_Texture* tex)
@@ -616,7 +617,7 @@ struct PhongParams {
 
     static SG_Texture* specularTex(SG_Material* mat)
     {
-        return SG_GetTexture(mat->uniforms[8].as.texture_id);
+        return SG_GetTexture(mat->uniforms[8].as.sg_id);
     }
 
     static void aoTex(SG_Material* mat, SG_Texture* tex)
@@ -630,7 +631,7 @@ struct PhongParams {
 
     static SG_Texture* aoTex(SG_Material* mat)
     {
-        return SG_GetTexture(mat->uniforms[9].as.texture_id);
+        return SG_GetTexture(mat->uniforms[9].as.sg_id);
     }
 
     static void emissiveTex(SG_Material* mat, SG_Texture* tex)
@@ -644,7 +645,7 @@ struct PhongParams {
 
     static SG_Texture* emissiveTex(SG_Material* mat)
     {
-        return SG_GetTexture(mat->uniforms[10].as.texture_id);
+        return SG_GetTexture(mat->uniforms[10].as.sg_id);
     }
 
     static void normalTex(SG_Material* mat, SG_Texture* tex)
@@ -658,7 +659,7 @@ struct PhongParams {
 
     static SG_Texture* normalTex(SG_Material* mat)
     {
-        return SG_GetTexture(mat->uniforms[11].as.texture_id);
+        return SG_GetTexture(mat->uniforms[11].as.sg_id);
     }
 
     static void envmapMethod(SG_Material* mat, SG_EnvmapSampleMode mode)

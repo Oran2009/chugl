@@ -493,6 +493,13 @@ void R_Transform::print(R_Transform* xform)
     R_Transform::print(xform, 0);
 }
 
+void R_Transform::destroy(R_Transform* xform)
+{
+    // ASSERT(xform->parentID == 0);
+    // free child list
+    Arena::free(&xform->children);
+}
+
 void R_Transform::print(R_Transform* xform, u32 depth)
 {
     for (u32 i = 0; i < depth; ++i) {
@@ -647,6 +654,25 @@ void R_Geometry::rebuildWireframe(R_Geometry* geo, GraphicsContext* gctx)
                       wireframe_indices, size_bytes);
 }
 
+void R_Geometry::destroy(R_Geometry* geo)
+{
+    // destroy gpu vertex buffers
+    for (int i = 0; i < ARRAY_LENGTH(geo->gpu_vertex_buffers); ++i) {
+        GPU_Buffer::destroy(&geo->gpu_vertex_buffers[i]);
+    }
+
+    // destroy gpu indices buffer
+    GPU_Buffer::destroy(&geo->gpu_index_buffer);
+
+    // destroy gpu storage buffers
+    for (int i = 0; i < ARRAY_LENGTH(geo->pull_buffers); ++i) {
+        GPU_Buffer::destroy(&geo->pull_buffers[i]);
+    }
+
+    GPU_Buffer::destroy(&geo->gpu_wireframe_index_buffer);
+    free(geo->index_buffer_MALLOC);
+}
+
 // ============================================================================
 // R_Texture
 // ============================================================================
@@ -746,6 +772,11 @@ int R_Texture::sizeBytes(R_Texture* texture)
            * wgpuTextureGetHeight(texture->gpu_texture)
            * wgpuTextureGetDepthOrArrayLayers(texture->gpu_texture)
            * G_bytesPerTexel(wgpuTextureGetFormat(texture->gpu_texture));
+}
+
+void R_Texture::destroy(R_Texture* texture)
+{
+    WGPU_RELEASE_RESOURCE(Texture, texture->gpu_texture);
 }
 
 void R_Texture::load(GraphicsContext* gctx, R_Texture* texture, const char* filepath,
@@ -881,13 +912,6 @@ void R_Material::createBindGroupEntries(R_Material* mat, int group, G_Graph* gra
                                                         UNIFORM_OFFSET * i,
                                                         sizeof(SG_MaterialUniformData));
             } break;
-            case R_BIND_STORAGE: {
-                drawcall ?
-                  graph->bindBuffer(drawcall, group, i, binding->as.storage_buffer.buf,
-                                    0, binding->size) :
-                  graph->computePassBindBuffer(i, binding->as.storage_buffer.buf, 0,
-                                               binding->size);
-            } break;
             case R_BIND_SAMPLER: {
                 drawcall ? graph->bindSampler(
                              drawcall, group, i,
@@ -919,12 +943,26 @@ void R_Material::createBindGroupEntries(R_Material* mat, int group, G_Graph* gra
                 ASSERT(r_texture->gpu_texture);
                 ASSERT(binding->size == sizeof(R_TextureBinding));
             } break;
-            case R_BIND_STORAGE_EXTERNAL: {
-                drawcall ? graph->bindBuffer(drawcall, group, i,
-                                             binding->as.storage_external->buf, 0,
-                                             binding->size) :
-                           graph->computePassBindBuffer(
-                             i, binding->as.storage_external->buf, 0, binding->size);
+            case _R_BIND_STORAGE: {
+                R_Buffer* r_buffer = Component_GetBuffer(binding->as.storage_buffer_id);
+                WGPUBuffer buf     = r_buffer->gpu_buffer.buf;
+                u64 size
+                  = r_buffer->gpu_buffer.size; // does not support binding wgpuBuffer
+                                               // slices, only the entire thing
+                drawcall ? graph->bindBuffer(drawcall, group, i, buf, 0, size) :
+                           graph->computePassBindBuffer(i, buf, 0, size);
+            } break;
+            case R_BIND_STORAGE_INTERNAL: {
+                WGPUBuffer buf = binding->as.storage_buffer_internal.buf;
+                drawcall ?
+                  graph->bindBuffer(drawcall, group, i, buf, 0, binding->size) :
+                  graph->computePassBindBuffer(i, buf, 0, binding->size);
+            } break;
+            case _R_BIND_STORAGE_EXTERNAL: {
+                WGPUBuffer buf = binding->as.storage_buffer_external->buf;
+                drawcall ?
+                  graph->bindBuffer(drawcall, group, i, buf, 0, binding->size) :
+                  graph->computePassBindBuffer(i, buf, 0, binding->size);
             } break;
             default: ASSERT(false);
         }
@@ -952,11 +990,20 @@ void R_Material::setSamplerBinding(GraphicsContext* gctx, R_Material* mat, u32 l
                            sizeof(sampler_config));
 }
 
+void R_Material::setStorageBinding(GraphicsContext* gctx, R_Material* mat, u32 location,
+                                   SG_ID sg_buffer)
+{
+    R_Buffer* buffer = Component_GetBuffer(sg_buffer);
+    ASSERT(GPU_Buffer::usage(buffer->gpu_buffer) & WGPUBufferUsage_Storage);
+    R_Material::setBinding(gctx, mat, location, _R_BIND_STORAGE, &sg_buffer,
+                           sizeof(sg_buffer));
+}
+
 void R_Material::setExternalStorageBinding(GraphicsContext* gctx, R_Material* mat,
                                            u32 location, GPU_Buffer* buffer)
 {
     ASSERT(GPU_Buffer::usage(*buffer) & WGPUBufferUsage_Storage);
-    R_Material::setBinding(gctx, mat, location, R_BIND_STORAGE_EXTERNAL, buffer,
+    R_Material::setBinding(gctx, mat, location, _R_BIND_STORAGE_EXTERNAL, buffer,
                            buffer->size);
 }
 
@@ -967,9 +1014,21 @@ void R_Material::bindTexture(GraphicsContext* gctx, R_Material* mat, u32 locatio
                            sizeof(bind_desc));
 }
 
+void R_Material::destroy(R_Material* mat)
+{
+    for (int i = 0; i < ARRAY_LENGTH(mat->bindings); ++i) removeBinding(mat, i);
+    free(mat->_cpu_uniform_buffer_MALLOC);
+    WGPU_RELEASE_RESOURCE(Buffer, mat->_uniform_buffer);
+}
+
 void R_Material::setBinding(GraphicsContext* gctx, R_Material* mat, u32 location,
                             R_BindType type, void* data, size_t bytes)
 {
+    // remove old binding, in case we need to free pre-existing resources
+    // gate behind `if` because we want to avoid recreating GPU storage buffers
+    // i.e. if the new binding is also STORAGE reuse the memory and existing wgpuBuffer
+    if (type != mat->bindings[location].type) R_Material::removeBinding(mat, location);
+
     R_Binding* binding = &mat->bindings[location];
     binding->type      = type;
     binding->size      = bytes;
@@ -992,17 +1051,21 @@ void R_Material::setBinding(GraphicsContext* gctx, R_Material* mat, u32 location
             ASSERT(bytes == sizeof(SamplerConfig));
             binding->as.samplerConfig = *(SamplerConfig*)data;
         } break;
-        case R_BIND_STORAGE: {
-            GPU_Buffer::write(gctx, &binding->as.storage_buffer,
+        case _R_BIND_STORAGE: {
+            // Buffer binding (on m1 mac) has minimum 16
+            // for now, only allow binding the entire wgpuBuffer (no slices)
+            // binding->size is not used; instead, get the current size of the
+            // wgpuBuffer during bindgroup creation
+            binding->as.storage_buffer_id = *(SG_ID*)data;
+        } break;
+        case R_BIND_STORAGE_INTERNAL: {
+            GPU_Buffer::write(gctx, &binding->as.storage_buffer_internal,
                               WGPUBufferUsage_Storage, data, bytes);
         } break;
-        case R_BIND_STORAGE_EXTERNAL: {
-            // external storage buffer
-            binding->as.storage_external = (GPU_Buffer*)data;
+        case _R_BIND_STORAGE_EXTERNAL: {
+            binding->as.storage_buffer_external = (GPU_Buffer*)data;
         } break;
         default:
-            // if the new binding is also STORAGE reuse the memory, don't
-            // free
             log_error("unsupported binding type %d", type);
             ASSERT(false);
             break;
@@ -1455,8 +1518,8 @@ void R_Scene::rebuildLightInfoBuffer(GraphicsContext* gctx, R_Scene* scene,
 
         // resize the per-draw storage buffer
         size_t shadow_renderlist_count = hashmap_count(light->shadow_render_id_set);
-        int draw_uniform_size          = NEXT_MULT(sizeof(DrawUniforms),
-                                                   gctx->limits.minStorageBufferOffsetAlignment);
+        int draw_uniform_size = NEXT_MULT(sizeof(DrawUniforms),
+                                          gctx->limits.minStorageBufferOffsetAlignment);
         if (light->draw_storage_buffer == NULL
             || wgpuBufferGetSize(light->draw_storage_buffer)
                  < shadow_renderlist_count * draw_uniform_size) {
@@ -1886,9 +1949,56 @@ void Component_FreeComponent(SG_ID id)
             log_trace("graphics thread freeing shader %d", comp->id);
             R_Shader::free((R_Shader*)comp);
             _Component_FreeComponent(id, sizeof(R_Shader));
+            // corresponding GPU pipelines / BG Layouts based on this shader
+            // are freed in G_Cache::update()
+        } break;
+        case SG_COMPONENT_VIDEO: {
+            log_trace("graphics thread freeing video %d", comp->id);
+            R_Video::destroy((R_Video*)comp);
+            _Component_FreeComponent(id, sizeof(R_Video));
+        } break;
+        case SG_COMPONENT_TEXTURE: {
+            log_trace("graphics thread freeing texture %d", comp->id);
+            R_Texture::destroy((R_Texture*)comp);
+            _Component_FreeComponent(id, sizeof(R_Texture));
+        } break;
+        case SG_COMPONENT_MATERIAL: {
+            log_trace("graphics thread freeing material %d", comp->id);
+            R_Material::destroy((R_Material*)comp);
+            _Component_FreeComponent(id, sizeof(R_Material));
+        } break;
+        case SG_COMPONENT_PASS: {
+            log_trace("graphics thread freeing pass %d", comp->id);
+            R_Pass::destroy((R_Pass*)comp);
+            _Component_FreeComponent(id, sizeof(R_Pass));
+        } break;
+        case SG_COMPONENT_TRANSFORM:
+        case SG_COMPONENT_MESH: {
+            if (((R_Transform*)comp)->is_text) {
+                log_trace("graphics thread freeing text %d", comp->id);
+                R_Text::destroy((R_Text*)comp);
+                _Component_FreeComponent(id, sizeof(R_Text));
+            } else {
+                log_trace("graphics thread freeing mesh %d", comp->id);
+                R_Transform::destroy((R_Transform*)comp);
+                _Component_FreeComponent(id, sizeof(R_Transform));
+            }
+        } break;
+        case SG_COMPONENT_GEOMETRY: {
+            log_trace("graphics thread freeing geometry %d", comp->id);
+            R_Geometry::destroy((R_Geometry*)comp);
+            _Component_FreeComponent(id, sizeof(R_Geometry));
+        } break;
+        case SG_COMPONENT_LIGHT: {
+            log_trace("graphics thread freeing light %d", comp->id);
+            R_Light::destroy((R_Light*)comp);
+            _Component_FreeComponent(id, sizeof(R_Light));
         } break;
         default: {
             // other types not yet supported
+            log_trace("graphics thread free for component type [%s] not impl",
+                      SG_CKNames[comp->type]);
+            ASSERT(false);
         }
     }
 }
@@ -1994,6 +2104,7 @@ R_Text* Component_CreateText(GraphicsContext* gctx, FT_Library ft,
             // init mesh
             text->_geoID = geo->id;
             text->_matID = mat->id;
+            text->is_text = 1;
 
             // store offset
             R_Location loc
@@ -3344,7 +3455,7 @@ void R_Font::updateText(GraphicsContext* gctx, R_Font* font, R_Text* text)
 
     int line_offset_count = ARENA_LENGTH(&line_offsets, float);
     UNUSED_VAR(line_offset_count);
-    int line_offset_idx   = 0;
+    int line_offset_idx = 0;
 
     // compute new bounding box
     BoundingBox bb = {};
@@ -3561,4 +3672,27 @@ void R_Light::shadowAddMesh(SG_ID* mesh_list, int mesh_count, bool add)
         for (int i = 0; i < mesh_count; ++i)
             hashmap_delete(shadow_render_id_set, mesh_list + i);
     }
+}
+
+void R_Light::destroy(R_Light* light)
+{
+    hashmap_free(light->shadow_render_id_set);
+    WGPU_RELEASE_RESOURCE(Buffer, light->draw_storage_buffer);
+    WGPU_RELEASE_RESOURCE(Buffer, light->frame_uniform_buffer);
+    R_Transform::destroy(light);
+}
+
+void R_Video::destroy(R_Video* video)
+{
+    if (!video) return;
+    if (video->plm) plm_destroy(video->plm);
+    free(video->rgba_data_OWNED);
+}
+
+void R_Text::destroy(R_Text* text)
+{
+    ASSERT(text->is_text);
+    text->text.destroy();
+    text->font_path.destroy();
+    R_Transform::destroy(text);
 }

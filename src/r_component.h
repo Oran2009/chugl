@@ -120,6 +120,8 @@ struct R_Transform : public R_Component {
 
     SG_ID scene_id; // the scene this transform belongs to
 
+    b32 is_text;
+
     static void init(R_Transform* transform);
     static void initFromSG(R_Transform* r_xform, SG_Command_CreateXform* cmd);
 
@@ -178,6 +180,9 @@ struct R_Transform : public R_Component {
     // util -------------------------------------------------------------------
     static void print(R_Transform* xform, u32 depth);
     static void print(R_Transform* xform);
+
+
+    static void destroy(R_Transform* xform);
 };
 
 #define R_GEOMETRY_MAX_VERTEX_ATTRIBUTES 8
@@ -219,6 +224,8 @@ struct R_Geometry : public R_Component {
 
     static u32 wireframeIndicesCount(R_Geometry* geo);
     static void rebuildWireframe(R_Geometry* geo, GraphicsContext* gctx);
+
+    static void destroy(R_Geometry* geo);
 };
 
 // =============================================================================
@@ -230,6 +237,8 @@ struct R_Texture : public R_Component {
     SG_TextureDesc desc; // TODO redundant with R_Texture.gpu_texture
 
     static int sizeBytes(R_Texture* texture);
+
+    static void destroy(R_Texture* texture);
 
     // validates that the WGPUTexture matches the sg_texturedesc
     static void validate(R_Texture* t)
@@ -449,8 +458,10 @@ enum R_BindType : u32 {
     R_BIND_SAMPLER,
     R_BIND_TEXTURE,
     // R_BIND_TEXTURE_VIEW, // default textures (e.g. white pixel)
-    R_BIND_STORAGE,
-    R_BIND_STORAGE_EXTERNAL, // pointer to external storage buffer (ref)
+    _R_BIND_STORAGE,          // backed by chuck-side SG_ID
+    R_BIND_STORAGE_INTERNAL,  // user set ckarray to material uniform, no gpu=buffer on
+                              // chuck side
+    _R_BIND_STORAGE_EXTERNAL, // pointer to external storage buffer (ref)
     // R_BIND_STORAGE_TEXTURE_ID, // for scenegraph textures
 };
 
@@ -467,8 +478,12 @@ struct R_Binding {
     union {
         R_TextureBinding texture;
         SamplerConfig samplerConfig;
-        GPU_Buffer storage_buffer;
-        GPU_Buffer* storage_external; // ptr here might be dangerous...
+        SG_ID storage_buffer_id;             // if R_BindType == R_Bind_Storage
+        GPU_Buffer storage_buffer_internal;  // R_BindType == R_Bind_Storage_Internal
+        GPU_Buffer* storage_buffer_external; // R_BindType == R_Bind_Storage_External
+                                             // ptr here safe so long as gpubuffer does
+                                             // not get realloced. only used for R_Font
+                                             // which lives in static array
     } as;
 };
 
@@ -491,7 +506,7 @@ struct R_Material : public R_Component {
     // bindgroup state (uniforms, storage buffers, textures, samplers)
     R_Binding bindings[CHUGL_MATERIAL_MAX_BINDINGS];
 
-    void* _cpu_uniform_buffer_MALLOC; // used for batch writing
+    void* _cpu_uniform_buffer_MALLOC; // used for batch writing. must FREE
     WGPUBuffer _uniform_buffer;
     bool _uniform_buffer_stale; // used to batch write all uniform data in
                                 // R_Material::createBindGroupEntries
@@ -514,6 +529,9 @@ struct R_Material : public R_Component {
     static void setSamplerBinding(GraphicsContext* gctx, R_Material* mat, u32 location,
                                   SG_Sampler sampler);
 
+    static void setStorageBinding(GraphicsContext* gctx, R_Material* mat, u32 location,
+                                  SG_ID sg_buffer);
+
     static void setExternalStorageBinding(GraphicsContext* gctx, R_Material* mat,
                                           u32 location, GPU_Buffer* buffer);
 
@@ -522,9 +540,19 @@ struct R_Material : public R_Component {
 
     static void removeBinding(R_Material* mat, u32 location)
     {
-        ASSERT(false);
-        // TODO
+        switch (mat->bindings[location].type) {
+            case R_BIND_STORAGE_INTERNAL: {
+                GPU_Buffer::destroy(
+                  &mat->bindings[location].as.storage_buffer_internal);
+            } break;
+            default: break;
+        }
+
+        // zero
+        mat->bindings[location] = {};
     }
+
+    static void destroy(R_Material* mat);
 };
 
 // =============================================================================
@@ -589,6 +617,8 @@ struct R_Light : public R_Transform {
         }
         return glm::mat4(1.0);
     }
+
+    static void destroy(R_Light* light);
 };
 
 // =============================================================================
@@ -660,6 +690,14 @@ struct R_Pass : public R_Component {
     WGPUTexture depth_texture;
     WGPUTexture msaa_color_target;
 
+    static void destroy(R_Pass* pass)
+    {
+        if (!pass) return;
+        WGPU_RELEASE_RESOURCE(Buffer, pass->frame_uniform_buffer);
+        WGPU_RELEASE_RESOURCE(Texture, pass->depth_texture);
+        WGPU_RELEASE_RESOURCE(Texture, pass->msaa_color_target);
+    }
+
     // updates the scenepass depth texture to match the color target
     // also rebuilds the msaa color target if msaa is enabled
     static void updateScenePass(R_Pass* pass, WGPUTexture color_target,
@@ -719,7 +757,8 @@ struct R_Pass : public R_Component {
             ASSERT(pass->depth_texture);
 
             log_trace(
-              "Rebuilding ScenePass[%d:%s] depth texture, dims: %dx%d, address: %p",
+              "Rebuilding ScenePass[%d:%s] depth texture, dims: %dx%d, "
+              "address: %p",
               pass->id, pass->sg_pass.name, wgpuTextureGetWidth(pass->depth_texture),
               wgpuTextureGetHeight(pass->depth_texture), (void*)pass->depth_texture);
         }
@@ -740,7 +779,8 @@ struct R_Pass : public R_Component {
             ASSERT(pass->msaa_color_target);
 
             log_trace(
-              "Rebuilding ScenePass[%d:%s] %dxMultisampled texture, dims: %dx%d, "
+              "Rebuilding ScenePass[%d:%s] %dxMultisampled texture, "
+              "dims: %dx%d, "
               "address: %p",
               pass->id, pass->sg_pass.name,
               wgpuTextureGetSampleCount(pass->msaa_color_target),
@@ -799,24 +839,27 @@ struct R_Text : public R_Transform {
     float width; // max width in worldspace units, used for alignment
     SG_Text_AlignmentType alignment;
     float size = 1.0f;
+
+    static void destroy(R_Text* text);
 };
 
 struct R_Font {
     chugl_string font_path;
-    FT_Face face; // TODO multiplex faces across R_Font. multiple R_Font with same
-                  // font but different text can share the same face
+    FT_Face face; // TODO multiplex faces across R_Font. multiple R_Font with
+                  // same font but different text can share the same face
 
     FT_Int32 loadFlags;
     FT_Kerning_Mode kerningMode;
 
-    // Size of the em square used to convert metrics into em-relative values,
-    // which can then be scaled to the worldSize. We do the scaling ourselves in
-    // floating point to support arbitrary world sizes (whereas the fixed-point
-    // numbers used by FreeType do not have enough resolution if the world size
-    // is small).
-    // Following the FreeType convention, if hinting (and therefore scaling) is
-    // enabled, this value is in 1/64th of a pixel (compatible with 26.6 fixed point
-    // numbers). If hinting/scaling is not enabled, this value is in font units.
+    // Size of the em square used to convert metrics into em-relative
+    // values, which can then be scaled to the worldSize. We do the
+    // scaling ourselves in floating point to support arbitrary world
+    // sizes (whereas the fixed-point numbers used by FreeType do not
+    // have enough resolution if the world size is small). Following the
+    // FreeType convention, if hinting (and therefore scaling) is
+    // enabled, this value is in 1/64th of a pixel (compatible with 26.6
+    // fixed point numbers). If hinting/scaling is not enabled, this
+    // value is in font units.
     float emSize;
 
     float worldSize = 1.0f;
@@ -864,6 +907,8 @@ struct R_Video : public R_Component {
     int rgba_data_size;
     float rate = 1.0f;
     SG_Video_TextureMode texture_mode;
+
+    static void destroy(R_Video* video);
 };
 
 #ifndef WEBCHUGL_NO_WEBCAM
@@ -874,8 +919,8 @@ struct R_Video : public R_Component {
 struct R_Webcam : public R_Component {
     SG_ID webcam_texture_id;
     int device_id;
-    u64 last_frame_count; // last webcame frame count, used to detect new frames and
-                          // prevent reuploading old frames
+    u64 last_frame_count; // last webcame frame count, used to detect new
+                          // frames and prevent reuploading old frames
     bool freeze;
 
     static void updateTexture(GraphicsContext* gctx, R_Webcam* webcam);
@@ -904,8 +949,8 @@ R_Geometry* Component_CreateGeometry(GraphicsContext* gctx, SG_ID geo_id);
 
 R_Shader* Component_CreateShader(GraphicsContext* gctx, SG_Command_ShaderCreate* cmd);
 
-// R_Material* Component_CreateMaterial(GraphicsContext* gctx, R_MaterialConfig*
-// config);
+// R_Material* Component_CreateMaterial(GraphicsContext* gctx,
+// R_MaterialConfig* config);
 R_Material* Component_CreateMaterial(GraphicsContext* gctx,
                                      SG_Command_MaterialCreate* cmd);
 
@@ -957,8 +1002,8 @@ void Component_Free();
 // component garbage collection
 void Component_FreeComponent(SG_ID id);
 
-// TODO: add destroy functions. Remember to change offsets after swapping!
-// should these live in the components?
+// TODO: add destroy functions. Remember to change offsets after
+// swapping! should these live in the components?
 // TODO: on xform destroy, set material/geo primitive to stale
 // void Component_DestroyXform(u64 id);
 /*
@@ -968,12 +1013,12 @@ Enforcing pointer safety:
     - similar to how all memory allocations are routed through realloc
 - all component accesses happen via IDs routed through the manager
     - IDs, unlike pointers, are safe to store
-    - if the component created by that ID is deleted, the ID lookup will yield
-    NULL, and the calling code will likely crash with a NULL pointer dereference
-    (easy to debug)
+    - if the component created by that ID is deleted, the ID lookup will
+yield NULL, and the calling code will likely crash with a NULL pointer
+dereference (easy to debug)
 - all deletions / GC are deferred to the VERY END of the frame
-    - prevents bug where a component is deleted WHILE it is being used after an
-    ID lookup
+    - prevents bug where a component is deleted WHILE it is being used
+after an ID lookup
     - enforce hygiene of never storing / carrying pointers across frame
     boundaries (within is ok)
     - also enables a more controllable GC system
@@ -987,19 +1032,23 @@ struct G_DrawCallPipelineDesc {
     SG_ID sg_shader_id;
     WGPUCullMode cull_mode;
     WGPUPrimitiveTopology primitive_topology;
-    b16 is_transparent; // TODO support other blend modes (subtrative, additive etc)
+    b16 is_transparent;
     b16 is_shadow_pass; // if true will create a pipeline with depthbias
     WGPUBlendState blend_state;
 };
 
+struct G_CacheComputePipelineKey {
+    WGPUShaderModule module;
+    SG_ID shader_id;
+};
+
 struct G_CacheComputePipeline {
-    WGPUShaderModule key; // TODO refcount
+    // GPU resources freed in G_Cache::update()
+    G_CacheComputePipelineKey key;
     struct {
         WGPUComputePipeline pipeline;
-        WGPUBindGroupLayout
-          bind_group_layout; // currently compute pipelines are only
-                             // allowed to use @group(0)
-                             // TODO remember to release the BGLayout too
+        WGPUBindGroupLayout bind_group_layout; // currently compute pipelines are only
+                                               // allowed to use @group(0)
     } val;
 
     static u64 hash(const void* item, uint64_t seed0, uint64_t seed1)
@@ -1012,7 +1061,6 @@ struct G_CacheComputePipeline {
     {
         G_CacheComputePipeline* ga = (G_CacheComputePipeline*)a;
         G_CacheComputePipeline* gb = (G_CacheComputePipeline*)b;
-        ASSERT(sizeof(ga->key) == sizeof(WGPUShaderModule));
         return memcmp(&ga->key, &gb->key, sizeof(ga->key));
     }
 };
@@ -1045,12 +1093,12 @@ struct G_CacheRenderPipelineKey {
 };
 
 struct G_CacheRenderPipelineVal {
+    // pipeline and bg layouts freed in G_Cache::update()
     WGPURenderPipeline pipeline;
-    WGPUBindGroupLayout
-      bind_group_layout_list[CHUGL_MAX_BINDGROUPS]; // TODO free on delete
+    WGPUBindGroupLayout bind_group_layout_list[CHUGL_MAX_BINDGROUPS]; 
 
     // lazy evaluate bindGroups because getting bindGroupLayout of
-    // a group that doesn't exist throughs a WGPU validation error
+    // a group that doesn't exist throws a WGPU validation error
     WGPUBindGroupLayout bindGroupLayout(int index)
     {
         if (bind_group_layout_list[index] == NULL) {
@@ -1088,8 +1136,8 @@ struct G_CacheBindGroupEntryBuffer {
 };
 
 struct G_CacheTextureViewDesc {
-    WGPUTexture texture; // refcounted, ensures that WGPUTexture address is not reused
-                         // so long as its in the G_Cache
+    WGPUTexture texture; // refcounted, ensures that WGPUTexture address
+                         // is not reused so long as its in the G_Cache
     WGPUTextureViewDimension view_dimension = WGPUTextureViewDimension_2D;
     int base_mip_level                      = 0;
     int mip_level_count                     = 1;
@@ -1099,7 +1147,8 @@ struct G_CacheTextureViewDesc {
     static void print(G_CacheTextureViewDesc* tv)
     {
         printf(
-          "Texture: %p\n dimension: %d\n base_mip_level: %d\n mip_level_count: %d\n "
+          "Texture: %p\n dimension: %d\n base_mip_level: %d\n "
+          "mip_level_count: %d\n "
           "base_array_layer: %d\n array_layer_count %d\n",
           (void*)tv->texture, tv->view_dimension, tv->base_mip_level,
           tv->mip_level_count, tv->base_array_layer, tv->array_layer_count);
@@ -1165,8 +1214,8 @@ struct G_CacheBindGroupEntry {
                 printf("sampler: %p\n", (void*)bge->as.sampler);
             } break;
             case G_CacheBindGroupEntryType_TextureView: {
-                // WGPUTexture texture; // refcounted, ensures that WGPUTexture address
-                // is not reused
+                // WGPUTexture texture; // refcounted, ensures that
+                // WGPUTexture address is not reused
                 //                      // so long as its in the G_Cache
                 // int base_mip_level;
                 // int mip_level_count;
@@ -1282,29 +1331,38 @@ struct G_Cache {
                                G_CacheTextureView::compare);
     }
 
-    G_CacheComputePipeline computePipeline(WGPUShaderModule module, WGPUDevice device,
+    G_CacheComputePipeline computePipeline(SG_ID shader_id, WGPUShaderModule module, WGPUDevice device,
                                            const char* label)
     {
+        // need to explicitly zero struct
+        G_CacheComputePipelineKey key = {};
+        key.module = module;
+        key.shader_id = shader_id;
+
         G_CacheComputePipeline* result
-          = (G_CacheComputePipeline*)hashmap_get(compute_pipeline_map, &module);
+          = (G_CacheComputePipeline*)hashmap_get(compute_pipeline_map, &key);
 
         if (result == NULL) { // create new pipeline
             ++frame_stats.compute_pipeline_misses;
-            log_trace("Cache miss [ComputePipeline], creating new from %p", module);
+            log_trace("Cache miss [ComputePipeline], creating new from %p and shader %d", module, shader_id);
 
             WGPUComputePipelineDescriptor desc = {};
             desc.label                         = WGPU_STR(label);
             desc.compute.module                = module;
             desc.compute.entryPoint            = WGPU_STR(CHUGL_COMPUTE_ENTRY_POINT);
 
+            // refcount compute shader module
+            WGPU_REFERENCE_RESOURCE(ShaderModule, module);
+
             WGPUComputePipeline pipeline
               = wgpuDeviceCreateComputePipeline(device, &desc);
+
             G_CacheComputePipeline item
-              = { module,
+              = { key,
                   {
-                    pipeline,
-                    wgpuComputePipelineGetBindGroupLayout(
-                      pipeline, 0) // caching because this wgpu call leaks memory
+                    pipeline, wgpuComputePipelineGetBindGroupLayout(
+                                pipeline,
+                                0) // caching because this wgpu call leaks memory
                   } };
 
             const void* replaced = hashmap_set(compute_pipeline_map, &item);
@@ -1325,15 +1383,17 @@ struct G_Cache {
           = (G_CacheRenderPipeline*)hashmap_get(render_pipeline_map, &key);
 
         if (result == NULL) {
-            // TODO: maybe hash the shader module / shader types to remove dependency on
-            // scene graph
+            // TODO: maybe hash the shader module / shader types to
+            // remove dependency on scene graph
             R_Shader* shader
               = Component_GetShader(key.drawcall_pipeline_desc.sg_shader_id);
             ASSERT(shader);
 
             ++frame_stats.render_pipeline_misses;
-            log_trace("Cache miss [RenderPipeline], creating new from Shader[%d:%s]",
-                      key.drawcall_pipeline_desc.sg_shader_id, shader->name);
+            log_trace(
+              "Cache miss [RenderPipeline], creating new from "
+              "Shader[%d:%s]",
+              key.drawcall_pipeline_desc.sg_shader_id, shader->name);
 
 #if 0 // uncomment to debug pipeline creation
       // print the key
@@ -1385,7 +1445,8 @@ struct G_Cache {
             // create GPUPipelineDesc from R_PipelineDesc
 
             bool is_render_pipeline = (shader->vertex_shader_module != NULL);
-            // bool is_compute_pipeline = (shader->compute_shader_module != NULL);
+            // bool is_compute_pipeline = (shader->compute_shader_module
+            // != NULL);
             UNUSED_VAR(is_render_pipeline);
             ASSERT(is_render_pipeline);
 
@@ -1410,8 +1471,8 @@ struct G_Cache {
             pipeline_desc.vertex.entryPoint  = { VS_ENTRY_POINT, WGPU_STRLEN };
 
             // TODO what happens if fragment shader is not defined?
-            // for backwards compat, we always enable alpha blending, even if pipeline
-            // is not transparent
+            // for backwards compat, we always enable alpha blending,
+            // even if pipeline is not transparent
 
             if (key.color_target_sample_count == 0) {
                 int i = 0;
@@ -1445,8 +1506,9 @@ struct G_Cache {
                  || key.drawcall_pipeline_desc.primitive_topology
                       == WGPUPrimitiveTopology_TriangleStrip);
             // from WebGPU spec:
-            // depthBias, depthBiasSlopeScale, and depthBiasClamp have no effect on
-            // "point-list", "line-list", and "line-strip" primitives, and must be 0.
+            // depthBias, depthBiasSlopeScale, and depthBiasClamp have
+            // no effect on "point-list", "line-list", and "line-strip"
+            // primitives, and must be 0.
             if (key.drawcall_pipeline_desc.is_shadow_pass && is_triangle_topology) {
                 // from E.Lengyel Vol2 Rendering pg 193-4
                 // polygon offset to remove shadow acne
@@ -1518,7 +1580,8 @@ struct G_Cache {
             ASSERT(memcmp(&item, &desc, sizeof(desc)) == 0);
 
             log_trace(
-              "Cache miss [TextureView: %p], creating new from Texture[%p] mips[%d:%d]",
+              "Cache miss [TextureView: %p], creating new from "
+              "Texture[%p] mips[%d:%d]",
               (void*)item.val.view, (void*)texture, desc.base_mip_level,
               desc.base_mip_level + desc.mip_level_count - 1);
 
@@ -1558,9 +1621,10 @@ struct G_Cache {
                             // debug info
                             int group, const char* label)
     {
-        // MSVC doesn't know how to initialize an array of unions, throws error c2280
-        // "attempting to reference a deleted function". super lame. So we manually
-        // allocate on the stack and initialize ourselves.
+        // MSVC doesn't know how to initialize an array of unions,
+        // throws error c2280 "attempting to reference a deleted
+        // function". super lame. So we manually allocate on the stack
+        // and initialize ourselves.
         u8 item_buff[sizeof(G_CacheBindGroup)] = {};
         G_CacheBindGroup* item                 = (G_CacheBindGroup*)item_buff;
         item->val.frames_till_expired = CHUGL_CACHE_BINDGROUP_FRAMES_TILL_EXPIRED;
@@ -1569,18 +1633,21 @@ struct G_Cache {
         item->key.layout         = layout;
         item->key.bg_entry_count = bg_entry_count;
 
-        // loop over all bg_entries to copy into lookup item and refcount & update
-        // frames_till_expired of any buffer or texture sources
+        // loop over all bg_entries to copy into lookup item and
+        // refcount & update frames_till_expired of any buffer or
+        // texture sources
         for (int bg_idx = 0; bg_idx < bg_entry_count; ++bg_idx) {
             G_CacheBindGroupEntry* bg = bg_entry_list + bg_idx;
             switch (bg->type) {
                 case G_CacheBindGroupEntryType_None:
-                case G_CacheBindGroupEntryType_Buffer: // buffer is refcounted on
-                                                       // bindgroup creation
+                case G_CacheBindGroupEntryType_Buffer: // buffer is
+                                                       // refcounted on
+                                                       // bindgroup
+                                                       // creation
                 case G_CacheBindGroupEntryType_Sampler: break;
                 case G_CacheBindGroupEntryType_TextureView: {
-                    textureView(
-                      bg->as.texture_view_desc); // refreshes frames_till_expired
+                    textureView(bg->as.texture_view_desc); // refreshes
+                                                           // frames_till_expired
                 } break;
                 default: UNREACHABLE;
             }
@@ -1593,8 +1660,10 @@ struct G_Cache {
 
         if (result == NULL) {
             ++frame_stats.bindgroup_misses;
-            log_trace("Cache miss [BindGroup] @group(%d) creating new for layout %p",
-                      group, layout);
+            log_trace(
+              "Cache miss [BindGroup] @group(%d) creating new for "
+              "layout %p with label: %s",
+              group, layout, label);
             static WGPUBindGroupEntry wgpu_bg_entry_list[CHUGL_MATERIAL_MAX_BINDINGS]
               = {};
 
@@ -1653,15 +1722,11 @@ struct G_Cache {
 
     void update()
     {
-        // TODO: loop over all pipelines, and if associated R_Shader is destroyed,
-        // free the pipeline and WGPU_RELEASE the cached bindgroup layouts
-
-        // Actually, for compute pipelines, the graphics thread GC can explicitly
-        // tell the rendergraph to release the compute pipeline and bind group layout!
 
         // loop over bindgroups. delete expired.
-        // intentionally NOT refcounting non-texture-view WGPU resources here under
-        // assumption that chuck-side refcounting will handle that for us
+        // intentionally NOT refcounting non-texture-view WGPU resources
+        // here under assumption that chuck-side refcounting will handle
+        // that for us
         {
             Arena::clearZero(&deletion_queue);
 
@@ -1708,7 +1773,8 @@ struct G_Cache {
                                 (void**)&cache_tv)) {
                 if (--cache_tv->val.frames_till_expired <= 0) {
 
-                    // sanity check the WGPUTexture is still good (heuristic)
+                    // sanity check the WGPUTexture is still good
+                    // (heuristic)
 #ifdef CHUGL_DEBUG
                     u32 sc = wgpuTextureGetSampleCount(cache_tv->key.texture);
                     ASSERT(sc == 1 || sc == 4); // webgpu only allows 4xMSAA
@@ -1718,10 +1784,12 @@ struct G_Cache {
                       = ARENA_PUSH_TYPE(&deletion_queue, G_CacheTextureViewDesc);
                     memcpy(desc, &cache_tv->key, sizeof(*desc));
 
-                    // on macos this * copy doesn't zero out struct padding, results in
-                    // undefined behavior *desc = cache_tv->key;
+                    // on macos this * copy doesn't zero out struct
+                    // padding, results in undefined behavior *desc =
+                    // cache_tv->key;
 
-                    // sanity check that bits+padding were copied correctly
+                    // sanity check that bits+padding were copied
+                    // correctly
 #ifdef CHUGL_DEBUG
                     if (memcmp(desc, &cache_tv->key, sizeof(*desc)) != 0) {
                         hexDump("copied G_CacheTextureViewDesc", desc, sizeof(*desc));
@@ -1751,6 +1819,81 @@ struct G_Cache {
             }
         }
 
+
+        // loop over all render pipelines, and if associated R_Shader is
+        // destroyed, free the pipeline and WGPU_RELEASE the cached
+        // bindgroup layouts
+        {
+            Arena::clearZero(&deletion_queue);
+
+            size_t idx_DONT_USE = 0;
+            G_CacheRenderPipeline* cache_rp        = NULL;
+            while (hashmap_iter(render_pipeline_map, &idx_DONT_USE, (void**)&cache_rp)) {
+                if (Component_GetShader(
+                    cache_rp->key.drawcall_pipeline_desc.sg_shader_id
+                ) == NULL) {
+                    *ARENA_PUSH_TYPE(&deletion_queue, G_CacheRenderPipeline) = *cache_rp;
+                }
+            }
+            int num_to_delete = ARENA_LENGTH(&deletion_queue, G_CacheRenderPipeline);
+            for (int i = 0; i < num_to_delete; i++) {
+                G_CacheRenderPipeline* rp
+                  = ARENA_GET_TYPE(&deletion_queue, G_CacheRenderPipeline, i);
+
+                // remove from hashmap
+                const void* deleted = hashmap_delete(render_pipeline_map, rp);
+                ASSERT(deleted);
+
+                // deref render pipeline gpu resources 
+                log_trace("deleting render pipeline %p of shader %d", 
+                    (void*)rp->val.pipeline, rp->key.drawcall_pipeline_desc.sg_shader_id);
+                WGPU_RELEASE_RESOURCE(RenderPipeline, rp->val.pipeline);
+                for (
+                    int bg_layout_idx = 0; 
+                    bg_layout_idx < ARRAY_LENGTH(rp->val.bind_group_layout_list); 
+                    ++bg_layout_idx) {
+                    WGPU_RELEASE_RESOURCE(BindGroupLayout, rp->val.bind_group_layout_list[bg_layout_idx]);
+                }
+
+            }
+        }
+
+
+        // loop over all compute pipelines, and if associated R_Shader is
+        // destroyed, free the pipeline and WGPU_RELEASE the cached
+        // bindgroup layouts
+        {
+            Arena::clearZero(&deletion_queue);
+
+            size_t idx_DONT_USE = 0;
+            G_CacheComputePipeline* cache_cp        = NULL;
+            while (hashmap_iter(compute_pipeline_map, &idx_DONT_USE, (void**)&cache_cp)) {
+                if (Component_GetShader(cache_cp->key.shader_id) == NULL) {
+                    *ARENA_PUSH_TYPE(&deletion_queue, G_CacheComputePipeline) = *cache_cp;
+                }
+            }
+            int num_to_delete = ARENA_LENGTH(&deletion_queue, G_CacheComputePipeline);
+            for (int i = 0; i < num_to_delete; i++) {
+                G_CacheComputePipeline* cp
+                  = ARENA_GET_TYPE(&deletion_queue, G_CacheComputePipeline, i);
+
+                // remove from hashmap
+                const void* deleted = hashmap_delete(compute_pipeline_map, cp);
+                ASSERT(deleted);
+
+                // deref render pipeline gpu resources 
+                log_trace("deleting compute pipeline %p of shader %d", 
+                    (void*)cp->val.pipeline, cp->key.shader_id);
+                WGPU_RELEASE_RESOURCE(ShaderModule, cp->key.module);
+                WGPU_RELEASE_RESOURCE(BindGroupLayout, cp->val.bind_group_layout);
+                WGPU_RELEASE_RESOURCE(ComputePipeline, cp->val.pipeline);
+            }
+        }
+
+        // Actually, for compute pipelines, the graphics thread GC can
+        // explicitly tell the rendergraph to release the compute
+        // pipeline and bind group layout!
+
         // update stats
         // improve: track resource deletions too
         // log_trace("--Cache Lifetime Stats--");
@@ -1766,13 +1909,13 @@ struct G_Cache {
 };
 
 enum G_RenderingLayer : u8 {
-    G_RenderingLayer_World = 0x00,
-    G_RenderingLayer_Background
-    = 0x10, // draw background first bc world may have translucent objects
+    G_RenderingLayer_World      = 0x00,
+    G_RenderingLayer_Background = 0x10, // draw background first bc world may have
+                                        // translucent objects
     G_RenderingLayer_Overlay
     = 0x20, // actually, would this just be a separate rendergraph node?
-    // maybe don't need as many layers because the rendergraph acts as a layering
-    // system...
+    // maybe don't need as many layers because the rendergraph acts as a
+    // layering system...
 };
 
 // clang-format off
@@ -1781,8 +1924,8 @@ opaque:         0LLLLLLL MMMMMMMM MMMMMMMM MMMMMMMM MMMMMMMM DDDDDDDD DDDDDDDD D
 translucent: :  1LLLLLLL DDDDDDDD DDDDDDDD DDDDDDDD MMMMMMMM MMMMMMMM MMMMMMMM MMMMMMMM
 */
 // clang-format on
-// ==optimize== store 16 bit offset of Material AND Shader in resource pool
-// to minimize number of pipeline switches
+// ==optimize== store 16 bit offset of Material AND Shader in resource
+// pool to minimize number of pipeline switches
 struct G_SortKey {
     const static u64 TRANLUCENT_MASK = (1ULL << 63);
     const static u8 LAYER_MASK       = 0b01111111;
@@ -1809,11 +1952,12 @@ struct G_SortKey {
         sort_key |= (u64)(layer & LAYER_MASK) << 56ULL;
 
         // calculate depth
-        // Input depth here is: 0 is the closest to the camera, positive values are
-        // further away. Negative values (behind camera) are clamped to 0.
-        // normalized_depth: 0.0 is closest to camera, 1.0 is farthest from camera.
-        // These values are inverted if transparent because we want to render in
-        // reverse order (back to front)
+        // Input depth here is: 0 is the closest to the camera, positive
+        // values are further away. Negative values (behind camera) are
+        // clamped to 0. normalized_depth: 0.0 is closest to camera, 1.0
+        // is farthest from camera. These values are inverted if
+        // transparent because we want to render in reverse order (back
+        // to front)
         float normalized_depth = CLAMP(depth, 0, camera_far) / camera_far;
         if (translucent) normalized_depth = 1.0 - normalized_depth;
         u32 depth_key = (u32)(normalized_depth * DEPTH_MASK) & DEPTH_MASK;
@@ -1853,14 +1997,13 @@ struct G_DrawCall {
         u32 start, count;
     } bg_list[CHUGL_MAX_BINDGROUPS];
 
-    // no dynamic offsets for now (until we make C port of webgpu-utils shader
-    // parser)
-    // dynamic_offsets = new Array<Array<number>>(4);
+    // no dynamic offsets for now (until we make C port of webgpu-utils
+    // shader parser) dynamic_offsets = new Array<Array<number>>(4);
 
     G_DrawCallPipelineDesc _pipeline_desc;
 
-    // if is_shadow_pass = true, will create a pipeline with depthBias* params in
-    // WGPUDepthStencilState
+    // if is_shadow_pass = true, will create a pipeline with depthBias*
+    // params in WGPUDepthStencilState
     void pipelineDesc(SG_ID sg_shader_id, WGPUCullMode cull_mode,
                       WGPUPrimitiveTopology primitive_topology,
                       WGPUBlendState* blend_state, bool is_transparent,
@@ -1871,8 +2014,8 @@ struct G_DrawCall {
         _pipeline_desc.cull_mode          = cull_mode;
         _pipeline_desc.primitive_topology = primitive_topology;
 
-        // doing this to avoid a horrible bug where setting a bool directly
-        // didn't zero out all the padded memory
+        // doing this to avoid a horrible bug where setting a bool
+        // directly didn't zero out all the padded memory
         _pipeline_desc.is_transparent = is_transparent ? 1UL : 0UL;
         _pipeline_desc.is_shadow_pass = is_shadow_pass ? 1UL : 0UL;
 
@@ -1912,14 +2055,16 @@ struct G_DrawCallList {
                           return 0;
                       }
 
-                      // CANNOT do this because u64 subtraction returns a u64...duh
-                      //   return sort_key_b - sort_key_a; // sorts in ascending order
+                      // CANNOT do this because u64 subtraction returns
+                      // a u64...duh
+                      //   return sort_key_b - sort_key_a; // sorts in
+                      //   ascending order
                   });
             sorted = true;
         }
 
-        // ==optimize== only need to update pipeline/bindgroup if they changed
-        // so somehow track curr_pipeline, curr_bindgroup etc
+        // ==optimize== only need to update pipeline/bindgroup if they
+        // changed so somehow track curr_pipeline, curr_bindgroup etc
         for (int i = 0; i < drawcall_count; i++) {
             G_DrawCall* d
               = ARENA_GET_TYPE(drawcall_pool, G_DrawCall, drawcall_start_idx + i);
@@ -1952,7 +2097,8 @@ struct G_DrawCallList {
             //       "PipelineDesc:\n"
             //       "   shader_id: %d\n"
             //       "   is_transparent: %d\n",
-            //       d->_pipeline_desc.sg_shader_id, d->_pipeline_desc.is_transparent);
+            //       d->_pipeline_desc.sg_shader_id,
+            //       d->_pipeline_desc.is_transparent);
             // }
 
             // set pipeline
@@ -1960,18 +2106,23 @@ struct G_DrawCallList {
                                              cached_pipeline->val.pipeline);
 
             /* Pipeline Layout / Bindgroup situation
-            wgpuRenderPipelineGetLayout() can only be called for group index up to the
-            max defined. e.g. if a shader defines @group(0) and @group(2), you can get
-            the layout for @group(1) but NOT @group(3). Doing so crashes.
+            wgpuRenderPipelineGetLayout() can only be called for group
+            index up to the max defined. e.g. if a shader defines
+            @group(0) and @group(2), you can get the layout for
+            @group(1) but NOT @group(3). Doing so crashes.
 
-            If @group(0) and @group(2) are defined, you still must set an empty
-            wgpuBindGroup in the slot of @group(1). But you *cannot* set a bindgroup in
+            If @group(0) and @group(2) are defined, you still must set
+            an empty wgpuBindGroup in the slot of @group(1). But you
+            *cannot* set a bindgroup in
             @group(3).
 
-            Solution until I make a shader parser / wgpuPipelineLayout library:
-                - guess the max defined @group of the pipeline by seeing the highest
+            Solution until I make a shader parser / wgpuPipelineLayout
+            library:
+                - guess the max defined @group of the pipeline by seeing
+            the highest
             @group that has nonzero num_bindings
-                - if less than that, always set the bindgroup, even if num_bindings = 0
+                - if less than that, always set the bindgroup, even if
+            num_bindings = 0
             */
             int max_group_number = 0;
             for (int bg_idx = ARRAY_LENGTH(d->bg_list) - 1; bg_idx >= 0; --bg_idx) {
@@ -2042,7 +2193,8 @@ struct G_RenderTarget {
     //     rt.type           = G_RenderTargetType_Canvas,
     //     rt.view_format
     //       = srgb ?
-    //       G_Util::textureFormatSrgbVariant(gctx->surface_preferred_format) :
+    //       G_Util::textureFormatSrgbVariant(gctx->surface_preferred_format)
+    //       :
     //                gctx->surface_preferred_format;
     //     return rt;
     // }
@@ -2087,6 +2239,7 @@ struct G_RenderPassParams {
 };
 
 struct G_ComputePassParams {
+    SG_ID shader_id;
     WGPUShaderModule module;
     u32 x, y, z;            // workgroup size
     u32 bg_start, bg_count; // bindgroup entries
@@ -2169,8 +2322,8 @@ struct G_Graph {
         pass->rp.color_target.texture_view     = view;
         pass->rp.color_target.view_format      = format;
 
-        // currently this method is only used for setting the surface backbuffer
-        // so we assume sample count is always 1
+        // currently this method is only used for setting the surface
+        // backbuffer so we assume sample count is always 1
         pass->rp.color_target_sample_count = 1;
     }
 
@@ -2380,7 +2533,7 @@ struct G_Graph {
         ++pass_list[pass_count - 1].cp.bg_count;
     }
 
-    void addComputePass(const char* name, WGPUShaderModule module, u32 x, u32 y, u32 z)
+    void addComputePass(const char* name, SG_ID shader_id, WGPUShaderModule module, u32 x, u32 y, u32 z)
     {
         if (pass_count == CHUGL_RENDERGRAPH_MAX_PASSES) {
             log_error("Reached max pass count %d", pass_count);
@@ -2390,7 +2543,8 @@ struct G_Graph {
         COPY_STRING(compute_pass->name, name);
         compute_pass->type = G_PassType_Compute;
         compute_pass->cp
-          = { module,
+          = { shader_id,
+              module,
               x,
               y,
               z,
@@ -2407,8 +2561,8 @@ struct G_Graph {
             switch (pass->type) {
                 case G_PassType_None: break;
                 case G_PassType_Render: {
-                    // log_trace("Beginning RenderPass: %s", pass->name);
-                    // create pass desc
+                    // log_trace("Beginning RenderPass: %s",
+                    // pass->name); create pass desc
                     WGPURenderPassDescriptor render_pass_desc = {};
                     render_pass_desc.label                    = WGPU_STR(pass->name);
                     WGPURenderPassColorAttachment ca          = {};
@@ -2430,9 +2584,9 @@ struct G_Graph {
                                          wgpuTextureGetFormat(
                                            pass->rp.color_target_view_desc.texture);
 
-                        ca.view       = pass->rp.color_target_is_external_view ?
-                                          pass->rp.color_target.texture_view :
-                                          cache.textureView(pass->rp.color_target_view_desc);
+                        ca.view = pass->rp.color_target_is_external_view ?
+                                    pass->rp.color_target.texture_view :
+                                    cache.textureView(pass->rp.color_target_view_desc);
                         ca.loadOp     = pass->rp.color_load_op;
                         ca.storeOp    = pass->rp.color_store_op;
                         ca.clearValue = pass->rp.clear_color;
@@ -2454,13 +2608,14 @@ struct G_Graph {
                           = wgpuTextureGetFormat(pass->rp._depth_target.texture);
 
                         ds.view = cache.textureView(pass->rp._depth_target);
-                        // defaults for render pass depth/stencil attachment
-                        // The initial value of the depth buffer, meaning "far"
+                        // defaults for render pass depth/stencil
+                        // attachment The initial value of the depth
+                        // buffer, meaning "far"
                         ds.depthClearValue = 1.0f;
                         ds.depthLoadOp     = WGPULoadOp_Clear;
                         ds.depthStoreOp    = WGPUStoreOp_Store;
-                        // we could turn off writing to the depth buffer globally
-                        // here
+                        // we could turn off writing to the depth buffer
+                        // globally here
                         ds.depthReadOnly = false;
 
                         // Stencil setup: Depth32Float has no stencil, so use Undefined ops
@@ -2473,7 +2628,8 @@ struct G_Graph {
                         render_pass_desc.depthStencilAttachment = &ds;
                     }
 
-                    // render_pass_desc.label = pass->sg_pass.name; // TODO
+                    // render_pass_desc.label = pass->sg_pass.name; //
+                    // TODO
 
                     WGPURenderPassEncoder render_pass_encoder
                       = wgpuCommandEncoderBeginRenderPass(command_encoder,
@@ -2506,7 +2662,7 @@ struct G_Graph {
                 } break;
                 case G_PassType_Compute: {
                     G_CacheComputePipeline cp
-                      = cache.computePipeline(pass->cp.module, device, NULL);
+                      = cache.computePipeline(pass->cp.shader_id, pass->cp.module, device, NULL);
                     WGPUComputePassDescriptor cp_desc = {};
                     cp_desc.label                     = WGPU_STR(pass->name);
                     WGPUComputePassEncoder compute_pass
@@ -2517,7 +2673,7 @@ struct G_Graph {
                     WGPUBindGroup bg                        = cache.bindGroup(
                       device,
                       ARENA_GET_TYPE(bind_group_entry_list, G_CacheBindGroupEntry,
-                                                            pass->cp.bg_start),
+                                     pass->cp.bg_start),
                       pass->cp.bg_count, cp.val.bind_group_layout,
                       compute_pass_binding_location, pass->name);
                     wgpuComputePassEncoderSetBindGroup(

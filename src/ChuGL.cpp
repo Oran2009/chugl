@@ -49,10 +49,7 @@
 #include "ulib_light.cpp"
 
 #include "ulib_video.cpp"
-
-#ifndef CHUGL_FAST_COMPILE
 #include "ulib_assloader.cpp"
-#endif
 
 
 // vendor
@@ -135,6 +132,37 @@ CK_DLL_INFO(ChuGL)
 void processAsyncFileDialogResults(); // forward decl
 
 static t_CKUINT chugl_next_frame_event_data_offset = 0;
+
+// ChuGL_Stats fields
+static t_CKUINT chugl_stats_xform_count_offset    = 0;
+static t_CKUINT chugl_stats_scenes_count_offset   = 0;
+static t_CKUINT chugl_stats_geo_count_offset      = 0;
+static t_CKUINT chugl_stats_shader_count_offset   = 0;
+static t_CKUINT chugl_stats_material_count_offset = 0;
+static t_CKUINT chugl_stats_texture_count_offset  = 0;
+static t_CKUINT chugl_stats_mesh_count_offset     = 0;
+static t_CKUINT chugl_stats_camera_count_offset   = 0;
+static t_CKUINT chugl_stats_pass_count_offset     = 0;
+static t_CKUINT chugl_stats_buffer_count_offset   = 0;
+static t_CKUINT chugl_stats_light_count_offset    = 0;
+// no separate model field because its stored in SG_XformArena
+// static t_CKUINT chugl_stats_model_count_offset    = 0;
+static t_CKUINT chugl_stats_video_count_offset  = 0;
+static t_CKUINT chugl_stats_webcam_count_offset = 0;
+
+static t_CKUINT chugl_stats_xform_free_count_offset    = 0;
+static t_CKUINT chugl_stats_scenes_free_count_offset   = 0;
+static t_CKUINT chugl_stats_geo_free_count_offset      = 0;
+static t_CKUINT chugl_stats_shader_free_count_offset   = 0;
+static t_CKUINT chugl_stats_material_free_count_offset = 0;
+static t_CKUINT chugl_stats_texture_free_count_offset  = 0;
+static t_CKUINT chugl_stats_mesh_free_count_offset     = 0;
+static t_CKUINT chugl_stats_camera_free_count_offset   = 0;
+static t_CKUINT chugl_stats_pass_free_count_offset     = 0;
+static t_CKUINT chugl_stats_buffer_free_count_offset   = 0;
+static t_CKUINT chugl_stats_light_free_count_offset    = 0;
+static t_CKUINT chugl_stats_video_free_count_offset    = 0;
+static t_CKUINT chugl_stats_webcam_free_count_offset   = 0;
 
 static void autoUpdateScenegraph(Arena* arena, SG_Scene* scene, Chuck_VM* VM,
                                  CK_DL_API API, t_CKINT _ggen_update_vt_offset)
@@ -902,6 +930,223 @@ CK_DLL_SFUN(chugl_reset_to_default)
     chugl_init_default_setup_impl();
 }
 
+CK_DLL_SFUN(chugl_stats)
+{
+    Chuck_Object* stats_obj = chugin_createCkObj("ChuGL_Stats", false, SHRED);
+
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_xform_count_offset)
+      = ARENA_LENGTH(&SG_XformArena, SG_Transform); // includes base GGen AND GModel
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_scenes_count_offset)
+      = ARENA_LENGTH(&SG_SceneArena, SG_Scene);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_geo_count_offset)
+      = ARENA_LENGTH(&SG_GeoArena, SG_Geometry);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_shader_count_offset)
+      = ARENA_LENGTH(&SG_ShaderArena, SG_Shader);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_material_count_offset)
+      = ARENA_LENGTH(&SG_MaterialArena, SG_Material);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_texture_count_offset)
+      = ARENA_LENGTH(&SG_TextureArena, SG_Texture);
+    // awkward that text and mesh are grouped together...
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_mesh_count_offset)
+      = ARENA_LENGTH(&SG_MeshArena, SG_Mesh) + ARENA_LENGTH(&SG_TextArena, SG_Text);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_camera_count_offset)
+      = ARENA_LENGTH(&SG_CameraArena, SG_Camera);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_pass_count_offset)
+      = ARENA_LENGTH(&SG_PassArena, SG_Pass);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_buffer_count_offset)
+      = ARENA_LENGTH(&SG_BufferArena, SG_Buffer);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_light_count_offset)
+      = ARENA_LENGTH(&SG_LightArena, SG_Light);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_video_count_offset)
+      = ARENA_LENGTH(&SG_VideoArena, SG_Video);
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_webcam_count_offset)
+      = ARENA_LENGTH(&SG_WebcamArena, SG_Webcam);
+
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_xform_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_TRANSFORM];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_scenes_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_SCENE];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_geo_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_GEOMETRY];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_shader_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_SHADER];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_material_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_MATERIAL];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_texture_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_TEXTURE];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_mesh_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_MESH];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_camera_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_CAMERA];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_pass_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_PASS];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_buffer_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_BUFFER];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_light_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_LIGHT];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_video_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_VIDEO];
+    OBJ_MEMBER_INT(stats_obj, chugl_stats_webcam_free_count_offset)
+      = SG_ComponentFreeCounts[SG_COMPONENT_WEBCAM];
+
+    RETURN->v_object = stats_obj;
+}
+
+// ============================================================================
+// Chudata Impl
+// ============================================================================
+
+enum ChudataType : u8 {
+    Chudata_Error,
+    Chudata_Int,
+    Chudata_Str,
+};
+
+struct ChudataVal {
+    ChudataType type;
+    union {
+      t_CKINT i;
+      char* str_OWNED;
+    } as;
+};
+
+struct Chudata {
+    char path[256];
+    ChudataVal data[256];
+
+    static void save(Chudata* c) {
+        FILE* fp = fopen(c->path, "w");
+
+        for (int i = 0; i < ARRAY_LENGTH(c->data); ++i) {
+			ChudataVal val = c->data[i];
+			// write tag byte
+			fwrite(&val.type, 1, 1, fp);
+			// write value
+			switch (val.type) {
+				case Chudata_Int: {
+					fwrite(&val.as.i, sizeof(val.as.i), 1, fp);
+				} break;
+				case Chudata_Str: {
+					ASSERT(false);
+					// fwrite(&val.len, sizeof(val.len), 1, w->fp); // write length
+					// fwrite(val.s, 1, val.len, w->fp);            // write string
+					// uint8_t null = 0;
+					// fwrite(&null, 1, 1, w->fp);                  // write null-terminator
+				} break;
+				default: break;
+			}
+        }
+
+        fclose(fp);
+    }
+
+    static void destroy(Chudata* c) {
+        // free all strings
+        for (int i = 0; i < ARRAY_LENGTH(c->data); ++i) {
+            if (c->data[i].type == Chudata_Str) {
+                free(c->data[i].as.str_OWNED);
+            }
+			c->data[i] = {};
+        }
+    }
+
+    static void load(Chudata* c) {
+        if (c->path[0] == 0) return;
+		FILE* file = fopen(c->path, "r");
+		if (file == NULL) return;
+
+		fseek(file, 0, SEEK_END);
+		size_t filesize = ftell(file);
+		fseek(file, 0, SEEK_SET);
+
+		char* data = (char*)malloc(filesize);
+
+		fread(data, 1, filesize, file);
+		fclose(file);
+
+		// TODO replace memcpy with safe_read fn
+		int cur = 0;
+		for (int i = 0; i < ARRAY_LENGTH(c->data); ++i) {
+			if (cur >= filesize) break;
+			memcpy(&c->data[i].type, data+cur, 1);
+			cur++;
+
+			switch (c->data[i].type) {
+				case Chudata_Int: {
+					memcpy(
+						&c->data[i].as.i,
+						data+cur,
+						sizeof(c->data[i].as.i)
+					);
+					cur += sizeof(c->data[i].as.i);
+				} break;
+				case Chudata_Str:
+					// ok &= safe_read(r, &res.len, sizeof(res.len));
+					// res.s = &r->data[r->cur];
+					// ok &= safe_read(r, NULL, res.len);
+					// uint8_t null;
+					// ok &= safe_read(r, &null, 1);
+					// ok &= (null == 0);
+					break;
+				default: {
+					// bad type
+					// ok &= false;
+					break;
+				}
+			}
+		}
+
+		free(data);
+    }
+};
+
+static t_CKUINT chudata_offset = 0;
+static const char* chudata_default_path = "./.chudata.chud";
+
+CK_DLL_CTOR(chudata_ctor_with_filename) { }
+CK_DLL_MFUN(chudata_set_str) { }
+
+CK_DLL_CTOR(chudata_ctor) {
+    Chudata* c = ALLOCATE_TYPE(Chudata);
+    OBJ_MEMBER_INT(SELF, chudata_offset) = (t_CKUINT)c;
+    snprintf(c->path, sizeof(c->path), "%s", chudata_default_path);
+	Chudata::load(c);
+}
+
+CK_DLL_DTOR(chudata_dtor) {
+    Chudata* c = (Chudata*) OBJ_MEMBER_UINT(SELF, chudata_offset);
+
+    // TODO write data
+	Chudata::save(c);
+	Chudata::destroy(c);
+	free(c);
+}
+
+CK_DLL_MFUN(chudata_set_int) {
+    Chudata* c = (Chudata*) OBJ_MEMBER_UINT(SELF, chudata_offset);
+	t_CKINT idx = GET_NEXT_INT(ARGS);
+	t_CKINT val = GET_NEXT_INT(ARGS);
+	// TODO clamp idx
+
+	// TODO free if prev a string
+	c->data[idx].type = Chudata_Int;
+	c->data[idx].as.i = val;
+}
+
+CK_DLL_MFUN(chudata_get_int) {
+    Chudata* c = (Chudata*) OBJ_MEMBER_UINT(SELF, chudata_offset);
+	t_CKINT idx = GET_NEXT_INT(ARGS);
+
+	// TODO assert type is int
+
+	RETURN->v_int = c->data[idx].as.i;
+}
+
+CK_DLL_MFUN(chudata_save) { 
+    Chudata* c = (Chudata*) OBJ_MEMBER_UINT(SELF, chudata_offset);
+	Chudata::save(c);
+}
+
 // ============================================================================
 // Chugin entry point
 // ============================================================================
@@ -959,6 +1204,80 @@ CK_DLL_QUERY(ChuGL)
 
         QUERY->add_mfun(QUERY, event_next_frame_waiting_on, "void", "waiting_on");
         QUERY->end_class(QUERY);
+    }
+
+    { // chugl stats
+        BEGIN_CLASS("ChuGL_Stats", "Object");
+        DOC_CLASS(
+          "Returned by GG.stats(). Contains stats about the memory usage and other "
+          "under-the-hood metrics of ChuGL since startup");
+
+        chugl_stats_xform_count_offset    = MVAR("int", "ggen_count", false);
+        chugl_stats_scenes_count_offset   = MVAR("int", "gscene_count", false);
+        chugl_stats_geo_count_offset      = MVAR("int", "geometry_count", false);
+        chugl_stats_shader_count_offset   = MVAR("int", "shader_count", false);
+        chugl_stats_material_count_offset = MVAR("int", "material_count", false);
+        chugl_stats_texture_count_offset  = MVAR("int", "texture_count", false);
+        chugl_stats_mesh_count_offset     = MVAR("int", "mesh_count", false);
+        chugl_stats_camera_count_offset   = MVAR("int", "gcamera_count", false);
+        chugl_stats_pass_count_offset     = MVAR("int", "gpass_count", false);
+        chugl_stats_buffer_count_offset   = MVAR("int", "buffer_count", false);
+        chugl_stats_light_count_offset    = MVAR("int", "glight_count", false);
+        // chugl_stats_model_count_offset    = MVAR("int", "gmodel_count", false);
+        chugl_stats_video_count_offset  = MVAR("int", "video_count", false);
+        chugl_stats_webcam_count_offset = MVAR("int", "webcam_count", false);
+
+        chugl_stats_xform_free_count_offset  = MVAR("int", "ggen_free_count", false);
+        chugl_stats_scenes_free_count_offset = MVAR("int", "gscene_free_count", false);
+        chugl_stats_geo_free_count_offset = MVAR("int", "geometry_free_count", false);
+        chugl_stats_shader_free_count_offset = MVAR("int", "shader_free_count", false);
+        chugl_stats_material_free_count_offset
+          = MVAR("int", "material_free_count", false);
+        chugl_stats_texture_free_count_offset
+          = MVAR("int", "texture_free_count", false);
+        chugl_stats_mesh_free_count_offset   = MVAR("int", "mesh_free_count", false);
+        chugl_stats_camera_free_count_offset = MVAR("int", "gcamera_free_count", false);
+        chugl_stats_pass_free_count_offset   = MVAR("int", "gpass_free_count", false);
+        chugl_stats_buffer_free_count_offset = MVAR("int", "buffer_free_count", false);
+        chugl_stats_light_free_count_offset  = MVAR("int", "glight_free_count", false);
+        chugl_stats_video_free_count_offset  = MVAR("int", "video_free_count", false);
+        chugl_stats_webcam_free_count_offset = MVAR("int", "webcam_free_count", false);
+
+        END_CLASS();
+    }
+
+    { // ChuGL persistent data API
+        BEGIN_CLASS("Chudata", "Object");
+        DOC_CLASS("(hidden)");
+        // DOC_CLASS(
+        //   "Helper for persistent data storage. Can be used for e.g. saving high scores. "
+        //   "Inspired by Pico8's cartdata API. "
+        // );
+
+        chudata_offset = MVAR("int", "@chudata_offset", false);
+
+        CTOR(chudata_ctor);
+        DOC_FUNC(
+          "Creates a data storage object based on the file `.chudata.chud`. To avoid collisions "
+          "it's advisable to use Chudata(string filename) with your own unique name."
+        );
+
+        DTOR(chudata_dtor);
+
+        MFUN(chudata_set_int, "void", "set");
+        ARG("int", "index");
+        ARG("int", "val");
+        DOC_FUNC("Store val at index. Index must be 0-255");
+
+        MFUN(chudata_get_int, "int", "geti");
+        ARG("int", "index");
+        DOC_FUNC("Get the int stored at index. Index must be 0-255");
+
+        MFUN(chudata_save, "void", "save");
+        DOC_FUNC("Flushes and saves data to a file named: ./.<filename> (note the leading . will make the file hidden by default)");
+
+
+        END_CLASS();
     }
 
     { // create default ckobjs
@@ -1038,10 +1357,7 @@ CK_DLL_QUERY(ChuGL)
     ulib_text_query(QUERY);
 
     ulib_video_query(QUERY);
-
-#ifndef CHUGL_FAST_COMPILE
     ulib_assloader_query(QUERY);
-#endif
 
     { // File Dialog
         BEGIN_CLASS("OpenFileEvent", "Event");
@@ -1288,7 +1604,10 @@ CK_DLL_QUERY(ChuGL)
         DOC_FUNC("(hidden)");
 
         SFUN(chugl_reset_to_default, "void", "reset");
-        DOC_FUNC("(hidden)");
+        DOC_FUNC("reset the scenegraph to the default startup state.");
+
+        SFUN(chugl_stats, "ChuGL_Stats", "stats");
+        DOC_FUNC("get stats on memory usage / etc about chugl since startup.");
 
         END_CLASS();
     } // GG
@@ -1306,13 +1625,13 @@ CK_DLL_QUERY(ChuGL)
         gg_config.root_pass_id = root_pass->id;
 
         // renderPass for main scene
-        SG_Pass* render_pass = ulib_pass_create(SG_PassType_Scene, NULL, false, NULL);
+        SG_Pass* render_pass = ulib_pass_create(SG_PassType_Scene, NULL, true, NULL);
         gg_config.default_scene_pass_id = render_pass->id;
 
         // output pass
-        Chuck_Object* output_pass_ckobj = chugin_createCkObj("OutputPass", false);
+        Chuck_Object* output_pass_ckobj = chugin_createCkObj("OutputPass", true);
         SG_Pass* output_pass
-          = ulib_pass_create_output_pass(NULL, output_pass_ckobj, false, NULL);
+          = ulib_pass_create_output_pass(NULL, output_pass_ckobj, true, NULL);
         gg_config.default_output_pass_id = output_pass->id;
 
         SG_Pass* bloom_pass = ulib_pass_create(SG_PassType_Bloom, NULL, true, NULL);

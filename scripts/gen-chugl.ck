@@ -27,7 +27,8 @@ doc.addGroup(
         "SG_Component",
         "Color",
         "AssLoader",
-        "ModelLoadDesc"
+        "ModelLoadDesc",
+        "ChuGL_Stats"
     ],
     // group name
     "Basic Classes",
@@ -225,6 +226,12 @@ doc.addGroup(
         "UI_ComboCallback",
         "UI_DrawList",
         "UI_DrawFlags",
+        "UI_KnobFlags",
+        "UI_KnobVariant",
+        "UI_ConfigFlags",
+        "UI_BackendFlags",
+        "UI_DrawListFlags",
+        "UI_IO",
         "UI",
     ],
     // group name
@@ -265,45 +272,45 @@ doc.addGroup(
     "GPU Buffer wrappers for ChuGL"
 );
 
-doc.addGroup(
-    // class names
-    [
-        "b2",
-        "b2World",
-        "b2BodyType",
-        "b2ShapeType",
-        "b2BodyDef",
-        "b2CastOutput",
-        "b2Polygon",
-        "b2Circle",
-        "b2Capsule",
-        "b2Segment",
-        "b2Filter",
-        "b2MassData",
-        "b2RayCastInput",
-        "b2ShapeCastInput",
-        "b2SegmentDistanceResult",
-        "b2QueryFilter",
-        "b2RayResult",
-        "b2ShapeDef",
-        "b2WorldDef",
-        "b2BodyMoveEvent",
-        "b2ContactHitEvent",
-        "b2Body",
-        "b2Shape",
-        "b2SurfaceMaterial",
-        "b2DebugDraw",
-    ],
-    // group name
-    "Box2D",
-    // file name
-    "chugl-box2d", 
-    // group description
-    "Box2D physics engine"
-);
+// doc.addGroup(
+//     // class names
+//     [
+//         "b2",
+//         "b2World",
+//         "b2BodyType",
+//         "b2ShapeType",
+//         "b2BodyDef",
+//         "b2CastOutput",
+//         "b2Polygon",
+//         "b2Circle",
+//         "b2Capsule",
+//         "b2Segment",
+//         "b2Filter",
+//         "b2MassData",
+//         "b2RayCastInput",
+//         "b2ShapeCastInput",
+//         "b2SegmentDistanceResult",
+//         "b2QueryFilter",
+//         "b2RayResult",
+//         "b2ShapeDef",
+//         "b2WorldDef",
+//         "b2BodyMoveEvent",
+//         "b2ContactHitEvent",
+//         "b2Body",
+//         "b2Shape",
+//         "b2SurfaceMaterial",
+//         "b2DebugDraw",
+//     ],
+//     // group name
+//     "Box2D",
+//     // file name
+//     "chugl-box2d", 
+//     // group description
+//     "Box2D physics engine"
+// );
 
 // sort for now until order is preserved by CKDoc
 doc.sort(true);
 
 // generate
-doc.outputToDir( ".", "ChuGL [alpha] API Reference (v0.2.9)" );
+doc.outputToDir( ".", "ChuGL [alpha] API Reference (v0.3.0)" );
