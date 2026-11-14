@@ -79,7 +79,7 @@ extern "C" void webchugl_stop_main_loop()
 
 // Letterbox setup for contrib.glfw3: overrides resize observer's computeSize
 // to return shrink-to-fit dimensions, and injects body centering CSS.
-// Defined in webchugl_main.cpp via EM_JS.
+// Defined by the WebChuGL host (src/host/canvas.cpp) via EM_JS.
 extern "C" void _chugl_setup_letterbox(double ar_x, double ar_y);
 #endif
 
