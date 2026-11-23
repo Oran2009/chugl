@@ -77,10 +77,8 @@ extern "C" void webchugl_stop_main_loop()
     g_webchugl_stop_requested = true;
 }
 
-// Letterbox setup for contrib.glfw3: overrides resize observer's computeSize
-// to return shrink-to-fit dimensions, and injects body centering CSS.
-// Defined by the WebChuGL host (src/host/canvas.cpp) via EM_JS.
-extern "C" void _chugl_setup_letterbox(double ar_x, double ar_y);
+// Defined by the WebChuGL host (src/host/canvas.cpp).
+extern "C" void chugl_fit_canvas(double aspect_x, double aspect_y);
 #endif
 
 // #include "camera.cpp"
@@ -430,8 +428,8 @@ struct App {
             }
 
 #ifdef EMSCRIPTEN_USE_PORT_CONTRIB_GLFW3
-            // Make canvas fill the browser window and auto-resize
-            emscripten_glfw_make_canvas_resizable(app->window, "window", nullptr);
+            // Canvas tracks its parent container, not the browser window.
+            chugl_fit_canvas(0, 0);
 
             // Let browser handle keyboard events when:
             // 1. Ctrl or Meta is held (browser shortcuts like Ctrl+T, Ctrl+W)
@@ -1862,9 +1860,8 @@ static void _R_HandleCommand(App* app, SG_Command* command)
             // On Emscripten, use CSS-based letterboxing instead of
             // glfwSetWindowAspectRatio (which grows-to-fit rather than
             // shrinks-to-fit, causing the canvas to exceed viewport bounds).
-            _chugl_setup_letterbox(
-              cmd->aspect_ratio_x > 0 ? cmd->aspect_ratio_x : 0,
-              cmd->aspect_ratio_y > 0 ? cmd->aspect_ratio_y : 0);
+            chugl_fit_canvas(cmd->aspect_ratio_x > 0 ? cmd->aspect_ratio_x : 0,
+                             cmd->aspect_ratio_y > 0 ? cmd->aspect_ratio_y : 0);
 #else
             glfwSetWindowAspectRatio(
               app->window,
