@@ -949,7 +949,6 @@ void SG_Init(const Chuck_DL_Api* api)
     Arena::init(&SG_BufferArena, sizeof(SG_Buffer) * 8);
     Arena::init(&SG_LightArena, sizeof(SG_Light) * 8);
     Arena::init(&SG_VideoArena, sizeof(SG_Video) * 4);
-
     Arena::init(&SG_WebcamArena, sizeof(SG_Webcam) * 8);
 
     // init gc state

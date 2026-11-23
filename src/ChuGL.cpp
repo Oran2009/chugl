@@ -1000,6 +1000,14 @@ enum ChudataType : u8 {
     Chudata_Error,
     Chudata_Int,
     Chudata_Str,
+    Chudata_Float,
+};
+
+const char* chudata_typenames[] = {
+	"empty",
+	"int",
+	"string",
+  "float",
 };
 
 struct ChudataVal {
@@ -1007,18 +1015,30 @@ struct ChudataVal {
     union {
       t_CKINT i;
       char* str_OWNED;
+      t_CKFLOAT f;
     } as;
 };
 
 struct Chudata {
-    char path[256];
+    char* path_OWNED;
     ChudataVal data[256];
 
     static void save(Chudata* c) {
-        FILE* fp = fopen(c->path, "w");
+		if (c->path_OWNED == NULL) {
+			log_warn("Chudata.save() failed. You must call Chudata.load(string filepath) first.");
+			return;
+		}
 
-        for (int i = 0; i < ARRAY_LENGTH(c->data); ++i) {
+		FILE* fp = fopen(c->path_OWNED, "w");
+
+		for (int i = 0; i < ARRAY_LENGTH(c->data); ++i) {
 			ChudataVal val = c->data[i];
+			if (val.type == Chudata_Error) continue;
+			
+			// write idx byte
+			ASSERT(i < 256);
+			u8 idx = i;
+			fwrite(&idx, 1, 1, fp);
 			// write tag byte
 			fwrite(&val.type, 1, 1, fp);
 			// write value
@@ -1027,20 +1047,23 @@ struct Chudata {
 					fwrite(&val.as.i, sizeof(val.as.i), 1, fp);
 				} break;
 				case Chudata_Str: {
-					ASSERT(false);
+					size_t len = strlen(val.as.str_OWNED);
+					fwrite(val.as.str_OWNED, 1, len, fp);     // write string
+					uint8_t null = 0;
+					fwrite(&null, 1, 1, fp);                  // write null-terminator
 					// fwrite(&val.len, sizeof(val.len), 1, w->fp); // write length
-					// fwrite(val.s, 1, val.len, w->fp);            // write string
-					// uint8_t null = 0;
-					// fwrite(&null, 1, 1, w->fp);                  // write null-terminator
+				} break;
+				case Chudata_Float: {
+					fwrite(&val.as.f, sizeof(val.as.f), 1, fp);
 				} break;
 				default: break;
 			}
-        }
+		}
 
         fclose(fp);
     }
 
-    static void destroy(Chudata* c) {
+    static void clear(Chudata* c) {
         // free all strings
         for (int i = 0; i < ARRAY_LENGTH(c->data); ++i) {
             if (c->data[i].type == Chudata_Str) {
@@ -1050,9 +1073,16 @@ struct Chudata {
         }
     }
 
-    static void load(Chudata* c) {
-        if (c->path[0] == 0) return;
-		FILE* file = fopen(c->path, "r");
+    static void load(Chudata* c, const char* path) {
+		// clear prev data
+		clear(c);
+		// free filepath
+		free(c->path_OWNED);
+		c->path_OWNED = strdup(path);
+
+        if (c->path_OWNED == NULL || c->path_OWNED[0] == 0) return;
+
+		FILE* file = fopen(c->path_OWNED, "r");
 		if (file == NULL) return;
 
 		fseek(file, 0, SEEK_END);
@@ -1066,12 +1096,22 @@ struct Chudata {
 
 		// TODO replace memcpy with safe_read fn
 		int cur = 0;
-		for (int i = 0; i < ARRAY_LENGTH(c->data); ++i) {
-			if (cur >= filesize) break;
+		while (cur < filesize) {
+			// read array index
+			int i = 0;
+			memcpy(&i, data+cur, 1);
+			ASSERT(i >= 0 && i < ARRAYSIZE(c->data));
+			cur += 1;
+			
+			// read data type
 			memcpy(&c->data[i].type, data+cur, 1);
 			cur++;
 
 			switch (c->data[i].type) {
+				case Chudata_Error: {
+					// TODO
+					ASSERT(false);
+				} break;
 				case Chudata_Int: {
 					memcpy(
 						&c->data[i].as.i,
@@ -1080,71 +1120,136 @@ struct Chudata {
 					);
 					cur += sizeof(c->data[i].as.i);
 				} break;
-				case Chudata_Str:
-					// ok &= safe_read(r, &res.len, sizeof(res.len));
-					// res.s = &r->data[r->cur];
-					// ok &= safe_read(r, NULL, res.len);
-					// uint8_t null;
-					// ok &= safe_read(r, &null, 1);
-					// ok &= (null == 0);
-					break;
+				case Chudata_Str: {
+					size_t len = strlen(data + cur);
+					if (len > 0) {
+						c->data[i].as.str_OWNED = strdup(data+cur);
+					}
+					cur += len + 1;
+				} break;
+				case Chudata_Float: {
+					t_CKFLOAT* dst = &c->data[i].as.f;
+					memcpy(dst, data+cur, sizeof(*dst));
+					cur += sizeof(*dst);
+				} break;
 				default: {
 					// bad type
 					// ok &= false;
-					break;
-				}
+					ASSERT(false);
+				} break;
 			}
 		}
 
 		free(data);
     }
+
+	static bool validate(t_CKINT idx) {
+		if (idx < 0 || idx > 255) {
+			log_warn("Chudata invalid idx: %d. Must be within [0,%d]", idx, 255);
+			return false;
+		}
+		return true;
+	}
+
+	static void set(Chudata* c, int idx, void* val, ChudataType type) {
+		if (!validate(idx)) return;
+		if (c->path_OWNED == NULL) {
+			log_warn("Chudata.set() failed. You must call Chudata.load(string filepath) first.");
+			return;
+		}
+		
+		// free pre-existing stuff
+		if (c->data[idx].type == Chudata_Str) {
+			free(c->data[idx].as.str_OWNED);
+		}
+
+		c->data[idx].type = type;
+		switch (type) {
+			case Chudata_Int: {
+				c->data[idx].as.i = *(t_CKINT*)val;
+			} break;
+			case Chudata_Str: {
+				c->data[idx].as.str_OWNED = strdup((char*)val);
+			} break;
+			case Chudata_Float: {
+				c->data[idx].as.f = *(t_CKFLOAT*)val;
+			} break;
+			default: ASSERT(false);
+		}
+	}
+
+	static void seti(Chudata* c, int idx, t_CKINT val) { set(c, idx, &val, Chudata_Int); }
+	static void sets(Chudata* c, int idx, const char* str) { set(c, idx, (void*) str, Chudata_Str); }
+	static void setf(Chudata* c, int idx, t_CKFLOAT val) { set(c, idx, &val, Chudata_Float); }
 };
 
-static t_CKUINT chudata_offset = 0;
-static const char* chudata_default_path = "./.chudata.chud";
+static Chudata chudata;
 
-CK_DLL_CTOR(chudata_ctor_with_filename) { }
-CK_DLL_MFUN(chudata_set_str) { }
-
-CK_DLL_CTOR(chudata_ctor) {
-    Chudata* c = ALLOCATE_TYPE(Chudata);
-    OBJ_MEMBER_INT(SELF, chudata_offset) = (t_CKUINT)c;
-    snprintf(c->path, sizeof(c->path), "%s", chudata_default_path);
-	Chudata::load(c);
+static bool chudata_validate_type(t_CKINT idx, ChudataType type) {
+	if (!Chudata::validate(idx)) return false;
+	ChudataType existing_type =	chudata.data[idx].type;
+	if (existing_type != Chudata_Error && existing_type != type) {
+		log_warn("Chudata.get(%d) expected type %s but found %s. Returning zero value.", idx, chudata_typenames[type], chudata_typenames[existing_type]);
+        return false;
+	}
+	return true;
 }
 
-CK_DLL_DTOR(chudata_dtor) {
-    Chudata* c = (Chudata*) OBJ_MEMBER_UINT(SELF, chudata_offset);
-
-    // TODO write data
-	Chudata::save(c);
-	Chudata::destroy(c);
-	free(c);
+CK_DLL_SFUN(chudata_load) {
+    const char* filepath = API->object->str(GET_NEXT_STRING(ARGS));
+	Chudata::load(&chudata, filepath);
 }
 
-CK_DLL_MFUN(chudata_set_int) {
-    Chudata* c = (Chudata*) OBJ_MEMBER_UINT(SELF, chudata_offset);
+CK_DLL_SFUN(chudata_set_int) {
 	t_CKINT idx = GET_NEXT_INT(ARGS);
 	t_CKINT val = GET_NEXT_INT(ARGS);
-	// TODO clamp idx
-
-	// TODO free if prev a string
-	c->data[idx].type = Chudata_Int;
-	c->data[idx].as.i = val;
+	Chudata::seti(&chudata, idx, val);
 }
 
-CK_DLL_MFUN(chudata_get_int) {
-    Chudata* c = (Chudata*) OBJ_MEMBER_UINT(SELF, chudata_offset);
+
+CK_DLL_SFUN(chudata_clear) { Chudata::clear(&chudata); }
+
+CK_DLL_SFUN(chudata_get_int) {
 	t_CKINT idx = GET_NEXT_INT(ARGS);
+	if (!chudata_validate_type(idx, Chudata_Int)) return;
 
-	// TODO assert type is int
-
-	RETURN->v_int = c->data[idx].as.i;
+	RETURN->v_int = chudata.data[idx].as.i;
 }
 
-CK_DLL_MFUN(chudata_save) { 
-    Chudata* c = (Chudata*) OBJ_MEMBER_UINT(SELF, chudata_offset);
-	Chudata::save(c);
+CK_DLL_SFUN(chudata_get_str) {
+	t_CKINT idx = GET_NEXT_INT(ARGS);
+	RETURN->v_string = NULL;
+	if (!chudata_validate_type(idx, Chudata_Str)) {
+		return;
+	}
+
+	if (chudata.data[idx].as.str_OWNED != NULL) {
+		RETURN->v_string = chugin_createCkString(chudata.data[idx].as.str_OWNED, false);
+	}
+}
+
+CK_DLL_SFUN(chudata_set_str) {
+	t_CKINT idx = GET_NEXT_INT(ARGS);
+    const char* val = API->object->str(GET_NEXT_STRING(ARGS));
+	Chudata::sets(&chudata, idx, val);
+}
+
+
+CK_DLL_SFUN(chudata_set_float) {
+	t_CKINT idx = GET_NEXT_INT(ARGS);
+	t_CKFLOAT val = GET_NEXT_FLOAT(ARGS);
+	Chudata::setf(&chudata, idx, val);
+}
+
+CK_DLL_SFUN(chudata_get_float) {
+	t_CKINT idx = GET_NEXT_INT(ARGS);
+	if (!chudata_validate_type(idx, Chudata_Float)) return;
+
+	RETURN->v_float = chudata.data[idx].as.f;
+}
+
+CK_DLL_SFUN(chudata_save) { 
+	Chudata::save(&chudata);
 }
 
 // ============================================================================
@@ -1253,29 +1358,49 @@ CK_DLL_QUERY(ChuGL)
         //   "Helper for persistent data storage. Can be used for e.g. saving high scores. "
         //   "Inspired by Pico8's cartdata API. "
         // );
+        // DOC_FUNC(
+        //   "Creates a data storage object based on the file `.chudata.chud`. To avoid collisions "
+        //   "it's advisable to use Chudata(string filename) with your own unique name."
+        // );
 
-        chudata_offset = MVAR("int", "@chudata_offset", false);
-
-        CTOR(chudata_ctor);
+        SFUN(chudata_load, "void", "load");
+        ARG("string", "path");
         DOC_FUNC(
-          "Creates a data storage object based on the file `.chudata.chud`. To avoid collisions "
-          "it's advisable to use Chudata(string filename) with your own unique name."
-        );
+			"Load and create a data storage object located at `path`. You must first call this function to init Chudata. "
+		);
 
-        DTOR(chudata_dtor);
-
-        MFUN(chudata_set_int, "void", "set");
+        SFUN(chudata_set_int, "void", "set");
         ARG("int", "index");
         ARG("int", "val");
-        DOC_FUNC("Store val at index. Index must be 0-255");
+        DOC_FUNC("Store val at index. Index must be 0-255. Must call Chudata.load(string) first. ");
 
-        MFUN(chudata_get_int, "int", "geti");
+        SFUN(chudata_get_int, "int", "geti");
         ARG("int", "index");
-        DOC_FUNC("Get the int stored at index. Index must be 0-255");
+        DOC_FUNC("Get the int stored at index. Index must be 0-255. Must call Chudata.load(string) first. ");
 
-        MFUN(chudata_save, "void", "save");
-        DOC_FUNC("Flushes and saves data to a file named: ./.<filename> (note the leading . will make the file hidden by default)");
+        SFUN(chudata_set_str, "void", "set");
+        ARG("int", "index");
+        ARG("string", "str");
+        DOC_FUNC("Store val at index. Index must be 0-255. Must call Chudata.load(string) first. ");
 
+        SFUN(chudata_get_str, "string", "gets");
+        ARG("int", "index");
+        DOC_FUNC("Get the string stored at index. Index must be 0-255. Must call Chudata.load(string) first. ");
+
+        SFUN(chudata_set_float, "void", "set");
+        ARG("int", "index");
+        ARG("float", "val");
+        DOC_FUNC("Store val at index. Index must be 0-255. Must call Chudata.load(string) first. ");
+
+        SFUN(chudata_get_float, "float", "getf");
+        ARG("int", "index");
+        DOC_FUNC("Get the float stored at index. Index must be 0-255. Must call Chudata.load(string) first. ");
+
+        SFUN(chudata_clear, "void", "clear");
+        DOC_FUNC("Clears all loaded data. Call Chudata.save() to commit these changes");
+
+        SFUN(chudata_save, "void", "save");
+        DOC_FUNC("Flushes and saves data to the file specified in Chudata.load(string). Must call Chudata.load(string) first.");
 
         END_CLASS();
     }

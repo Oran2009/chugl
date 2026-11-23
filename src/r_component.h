@@ -1346,6 +1346,9 @@ struct G_Cache {
             // refcount compute shader module
             WGPU_REFERENCE_RESOURCE(ShaderModule, module);
 
+            // refcount compute shader module
+            WGPU_REFERENCE_RESOURCE(ShaderModule, module);
+
             WGPUComputePipeline pipeline
               = wgpuDeviceCreateComputePipeline(device, &desc);
 
