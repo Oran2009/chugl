@@ -1210,9 +1210,15 @@ CK_DLL_SFUN(chudata_load) {
 	}
 
 	if (filepath[0] == '/') {
+<<<<<<< HEAD
 		snprintf(idbfs_filepath, "%s%s", IDBFS_MOUNT, filepath);
 	} else {
 		snprintf(idbfs_filepath, "%s/%s", IDBFS_MOUNT, filepath);
+=======
+		snprintf(idbfs_filepath, sizeof(idbfs_filepath), "%s%s", IDBFS_MOUNT, filepath);
+	} else {
+		snprintf(idbfs_filepath, sizeof(idbfs_filepath), "%s/%s", IDBFS_MOUNT, filepath);
+>>>>>>> upstream/main
 	}
 	Chudata::load(&chudata, idbfs_filepath);
 #else
